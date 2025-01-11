@@ -4,7 +4,6 @@ package-lock.json
 
 # Production build
 dist/
-build/
 release/
 *.exe
 *.msi
