@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, session } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, session, Tray, Menu } = require("electron");
 const Store = require("electron-store");
 const path = require("path");
 
@@ -28,6 +28,7 @@ function getAccountStore(username) {
 let mainWindow;
 let accountWindow;
 let isQuitting = false;
+let tray = null;
 
 app.on('before-quit', () => {
     isQuitting = true;
@@ -36,6 +37,24 @@ app.on('before-quit', () => {
 function createWindow() {
     const defaultState = { width: 1200, height: 800, x: undefined, y: undefined };
     const windowState = store.get("windowState", defaultState);
+
+    mainWindow = new BrowserWindow({
+        ...windowState,
+        frame: true,
+        autoHideMenuBar: true,
+        backgroundColor: '#000000',
+        titleBarOverlay: {
+            color: '#000000',
+            symbolColor: '#FFFFFF'
+        },
+        webPreferences: {
+            preload: path.join(__dirname, "preload.js"),
+            nodeIntegration: false,
+            contextIsolation: true,
+            partition: 'persist:instagram',
+            webSecurity: true
+        }
+    });
 
     try {
         const ses = session.fromPartition('persist:instagram');
@@ -97,24 +116,6 @@ function createWindow() {
         console.error('Session configuration error:', error);
     }
 
-    mainWindow = new BrowserWindow({
-        ...windowState,
-        frame: true,
-        autoHideMenuBar: true,
-        backgroundColor: '#000000',
-        titleBarOverlay: {
-            color: '#000000',
-            symbolColor: '#FFFFFF'
-        },
-        webPreferences: {
-            preload: path.join(__dirname, "preload.js"),
-            nodeIntegration: false,
-            contextIsolation: true,
-            partition: 'persist:instagram',
-            webSecurity: true
-        }
-    });
-
     mainWindow.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0');
 
     mainWindow.webContents.on('did-finish-load', () => {
@@ -150,8 +151,9 @@ function createWindow() {
         return { action: "deny" };
     });
 
-    mainWindow.on('close', () => {
+    mainWindow.on('close', (event) => {
         if (!isQuitting) {
+            event.preventDefault();
             mainWindow.hide();
             return false;
         }
@@ -180,6 +182,33 @@ ipcMain.on('show-notification', (event, notification) => {
         silent: notification.silent
     }).show();
 });
+
+function createTray() {
+    tray = new Tray(path.join(__dirname, 'assets/tray.png'));
+    
+    const contextMenu = Menu.buildFromTemplate([
+        { 
+            label: 'Open Instagram',
+            click: () => mainWindow.show()
+        },
+        { type: 'separator' },
+        { 
+            label: 'Exit',
+            click: () => {
+                isQuitting = true;
+                app.quit();
+            }
+        }
+    ]);
+
+    tray.setToolTip('Instagram Desktop');
+    tray.setContextMenu(contextMenu);
+    
+    tray.on('click', () => {
+        mainWindow.show();
+    });
+}
+
 
 ipcMain.handle('get-current-account', () => {
     return store.get('currentAccount');
@@ -223,14 +252,25 @@ ipcMain.handle('get-profile-data', async () => {
 });
 
 app.whenReady().then(() => {
+    const trayIconPath = path.join(__dirname, 'assets', 'tray.png');
+    if (!require('fs').existsSync(trayIconPath)) {
+        throw new Error('Required tray icon missing');
+    }
+    
     app.setName("Instagram Desktop");
     mainWindow = createWindow();
+    createTray();
+    
     if (process.platform === "win32") {
-        mainWindow.setIcon(path.join(__dirname, "build", "icon.ico"));
+        mainWindow.setIcon(path.join(__dirname, "assets", "icon.ico"));
     }
+}).catch(error => {
+    console.error('Failed to initialize app:', error);
+    app.quit();
 });
 
 app.on('window-all-closed', () => {
+    if (tray) tray.destroy();
     if (process.platform !== 'darwin') {
         app.quit();
     }
