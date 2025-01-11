@@ -8,6 +8,7 @@ const fs = require('fs');
 const fetch = require('node-fetch');
 const pipeline = util.promisify(stream.pipeline);
 const IgDownloader = require("ig-downloader").IgDownloader;
+const Updater = require('./updater');
 
 const store = new Store({
     name: "config",
@@ -754,13 +755,17 @@ ipcMain.handle('get-profile-data', async () => {
     }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
     const trayIconPath = path.join(__dirname, 'assets', 'tray.png');
     if (!require('fs').existsSync(trayIconPath)) {
         throw new Error('Required tray icon missing');
     }
     
     app.setName("Instagram Desktop");
+        if (settingsStore.get('autoUpdate')) {
+        const updater = new Updater();
+        await updater.checkForUpdates();
+    }
     mainWindow = createWindow();
     createTray();
     
