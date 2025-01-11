@@ -234,7 +234,6 @@ function injectSettingsButton() {
 
         const hoverDiv = settingsBtn.querySelector('div[role="none"]');
         if (hoverDiv) {
-            // Keep Instagram's hover structure
             hoverDiv.className = templateButton.querySelector('div[role="none"]').className;
             hoverDiv.setAttribute('role', 'none');
             hoverDiv.setAttribute('data-visualcompletion', 'ignore');
@@ -760,12 +759,12 @@ app.whenReady().then(async () => {
     if (!require('fs').existsSync(trayIconPath)) {
         throw new Error('Required tray icon missing');
     }
-    
-    app.setName("Instagram Desktop");
-        if (settingsStore.get('autoUpdate')) {
+    if (settingsStore.get('autoUpdate')) {
         const updater = new Updater();
         await updater.checkForUpdates();
     }
+    
+    app.setName("Instagram Desktop");
     mainWindow = createWindow();
     createTray();
     

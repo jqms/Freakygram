@@ -1,32 +1,34 @@
 const { app, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 const { execSync } = require('child_process');
 const fetch = require('node-fetch');
 
 class Updater {
     constructor() {
         this.currentVersion = require('./package.json').version;
-        this.updateUrl = 'https://github.com/jqms/Freakygram/releases/latest';
+        this.packageUrl = 'https://raw.githubusercontent.com/jqms/Freakygram/main/package.json';
+        this.releaseUrl = 'https://api.github.com/repos/jqms/Freakygram/releases/latest';
         this.downloadPath = path.join(app.getPath('temp'), 'instagram-desktop-update');
     }
 
     async checkForUpdates() {
         try {
-            const response = await fetch(this.updateUrl);
-            const data = await response.json();
-            const latestVersion = data.tag_name.replace('v', '');
-
-            if (this.isNewerVersion(latestVersion, this.currentVersion)) {
-                const shouldUpdate = await dialog.showMessageBox({
+            const { data: packageData } = await axios.get(this.packageUrl);
+            const latestVersion = packageData.version;
+    
+            if (this.isNewerVersion(latestVersion)) {
+                const { response } = await dialog.showMessageBox({
                     type: 'info',
                     title: 'Update Available',
-                    message: `Version ${latestVersion} is available. Would you like to update?`,
+                    message: `Version ${latestVersion} is available.\nWould you like to download?`,
                     buttons: ['Yes', 'No']
                 });
-
-                if (shouldUpdate.response === 0) {
-                    await this.downloadUpdate(data.assets[0].browser_download_url);
+    
+                if (response === 0) {
+                    const downloadUrl = `https://github.com/jqms/Freakygram/releases/download/${latestVersion}/Freakygram.Setup.exe`;
+                    await this.downloadUpdate(downloadUrl);
                 }
             }
         } catch (error) {
@@ -34,45 +36,31 @@ class Updater {
         }
     }
 
-    isNewerVersion(latest, current) {
-        const latestParts = latest.split('.').map(Number);
-        const currentParts = current.split('.').map(Number);
-
-        for (let i = 0; i < 3; i++) {
-            if (latestParts[i] > currentParts[i]) return true;
-            if (latestParts[i] < currentParts[i]) return false;
-        }
-        return false;
+    isNewerVersion(latest) {
+        const [latestMajor, latestMinor, latestPatch] = latest.split('.').map(Number);
+        const [currentMajor, currentMinor, currentPatch] = this.currentVersion.split('.').map(Number);
+        
+        return latestMajor > currentMajor || 
+               (latestMajor === currentMajor && latestMinor > currentMinor) ||
+               (latestMajor === currentMajor && latestMinor === currentMinor && latestPatch > currentPatch);
     }
 
     async downloadUpdate(url) {
         try {
-            const response = await fetch(url);
-            const buffer = await response.buffer();
+            const { data } = await axios.get(url, { responseType: 'arraybuffer' });
             
             if (!fs.existsSync(this.downloadPath)) {
                 fs.mkdirSync(this.downloadPath, { recursive: true });
             }
 
-            const updateFile = path.join(this.downloadPath, 'update.exe');
-            fs.writeFileSync(updateFile, buffer);
+            const setupPath = path.join(this.downloadPath, 'Freakygram Setup.exe');
+            fs.writeFileSync(setupPath, data);
 
-            const scriptContent = `
-                @echo off
-                timeout /t 2 /nobreak
-                copy /Y "${updateFile}" "${process.execPath}"
-                start "" "${process.execPath}"
-                del "%~f0"
-            `;
-
-            const scriptPath = path.join(this.downloadPath, 'update.bat');
-            fs.writeFileSync(scriptPath, scriptContent);
-
-            execSync(`start "" "${scriptPath}"`);
+            require('child_process').execSync(`start "" "${setupPath}"`);
             app.quit();
         } catch (error) {
-            console.error('Update download failed:', error);
-            dialog.showErrorBox('Update Failed', 'Failed to download update.');
+            console.error('Download failed:', error);
+            dialog.showErrorBox('Update Failed', 'Failed to download update');
         }
     }
 }
