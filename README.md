@@ -1,3 +1,7 @@
+Here's the updated version with the requested changes:
+
+---
+
 # Freakygram
 
 I didn't like having to open a browser to access Instagram. Here's an Electron version.
@@ -14,19 +18,23 @@ I didn't like having to open a browser to access Instagram. Here's an Electron v
   - Saves and restores session cookies for a seamless login experience.
 - **External Link Handling**: 
   - Opens links in the default browser instead of the app.
+- **Tray Support**:  
+  - Close to system tray with a right-click menu.
+- **Notifications**:  
+  - Desktop notification support.
+- **Download Support**:  
+  - Save images or videos from feed or reels to storage.
+- **Update Checker**:  
+  - Notify when a new version of the mod is available on GitHub.
 
 ---
 
 ### **To-Do**
-- ✅ **Tray Support**:  
-  Close to system tray, include a right-click menu.
-- ✅ **Notifications**:
-  - Desktop notification support.
-- ✅ **Download Support**:  
-  - Save images or videos from feed or reels to storage.
-- ❌ **Update Checker**:  
-  - Notify when a new version of the mod is available on GitHub.
-
+- ❌ **Discord RPC**:  
+  - Discord RPC to show that you are Instagram-ing...?
+  - Would show the current reel name I guess.
+- ❌ **Always On Top**:  
+  - Setting to make the window always be on top.
 ---
 
 ## Installation
@@ -55,14 +63,4 @@ I didn't like having to open a browser to access Instagram. Here's an Electron v
 ## Usage
 
 - Run the application to access Instagram's web interface in a desktop environment.
-- Custom window dimensions and account settings will be saved automatically.
-
----
-
-## Development
-- **Static Assets**:
-  - Icons and other assets are in the `assets` directory.
-
-### Scripts
-- `npm run start`: Launch the application.
-- `npm run build`: Build the app for production.
+- Custom window
