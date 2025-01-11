@@ -1,39 +1,47 @@
 {
-    "name": "instagram-desktop",
-    "version": "1.0.0",
-    "main": "main.js",
-    "scripts": {
-        "start": "electron .",
-        "build": "electron-builder",
-        "debug": "electron . --debug"
+  "name": "instagram-desktop",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "debug": "electron . --debug"
+  },
+  "build": {
+    "appId": "com.freakygram.desktop",
+    "productName": "Freakygram",
+    "win": {
+      "target": "nsis",
+      "icon": "./assets/icon.ico"
     },
-    "build": {
-        "appId": "com.instagram.desktop",
-        "productName": "Instagram Desktop",
-        "win": {
-            "target": "nsis",
-            "icon": "./build/icon.ico"
-        },
-        "files": [
-            "**/*",
-            "build/icon.ico"
-        ],
-        "extraResources": [
-            "build/icon.ico"
-        ],
-        "directories": {
-            "buildResources": "build"
-        },
-        "asar": true
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "./assets/icon.ico",
+      "uninstallerIcon": "./assets/icon.ico",
+      "installerHeaderIcon": "./assets/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Freakygram",
+      "artifactName": "Freakygram Setup.${ext}"
     },
-    "devDependencies": {
-        "electron": "^28.2.0",
-        "electron-builder": "^25.1.8"
+    "files": [
+      "**/*",
+      "assets/icon.ico"
+    ],
+    "directories": {
+      "buildResources": "build"
     },
-    "dependencies": {
-        "axios": "^1.7.9",
-        "crypto": "^1.0.1",
-        "electron-store": "^8.1.0",
-        "ig-downloader": "^1.1.4"
-    }
+    "asar": true
+  },
+  "devDependencies": {
+    "electron": "^28.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "crypto": "^1.0.1",
+    "electron-store": "^8.1.0",
+    "ig-downloader": "^1.1.4"
+  }
 }
