@@ -6,7 +6,10 @@ contextBridge.exposeInMainWorld('electron', {
     close: () => ipcRenderer.send('close'),
     showAccounts: () => ipcRenderer.send('show-accounts'),
     sendNotification: (notification) => ipcRenderer.emit('show-notification', notification),
-    downloadVideo: (url) => ipcRenderer.invoke('download-video', url)
+    downloadVideo: (url) => ipcRenderer.invoke('download-video', url),
+    getSettings: () => ipcRenderer.invoke('get-settings'),
+    saveSettings: (settings) => ipcRenderer.send('save-settings', settings),
+    showSettings: () => ipcRenderer.send('show-settings'),
 });
 
 contextBridge.exposeInMainWorld('accounts', {

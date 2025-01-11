@@ -20,6 +20,17 @@ const store = new Store({
     },
 });
 
+const settingsStore = new Store({
+    name: "settings",
+    defaults: {
+        closeToTray: false,
+        notifications: false,
+        downloadPath: app.getPath('downloads'),
+        discordRPC: false,
+        autoUpdate: true
+    }
+});
+
 const accountStores = new Map();
 function getAccountStore(username) {
     if (!accountStores.has(username)) {
@@ -36,6 +47,7 @@ let mainWindow;
 let accountWindow;
 let isQuitting = false;
 let tray = null;
+let settingsWindow = null;
 
 function createSvgIcon(svg) {
     return nativeImage.createFromBuffer(Buffer.from(svg));
@@ -133,16 +145,13 @@ function injectDownloadButton() {
                             e.preventDefault();
                             e.stopPropagation();
                             
-                            console.log('Download button clicked');
                             try {
                                 const reelArticle = container.closest('article');
                                 const reelLink = window.location.href;
                                 
                                 if (reelLink) {
                                     const videoUrl = reelLink;
-                                    console.log('Found video URL:', videoUrl);
                                     const result = await window.electron.downloadVideo(videoUrl);
-                                    console.log('Download result:', result);
                                 } else {
                                     console.error('No reel link found');
                                 }
@@ -173,10 +182,113 @@ function injectDownloadButton() {
     `;
 }
 
+function injectSettingsButton() {
+    return `
+    (function() {
+        let menuObserver = null;
+        
+        function setupMenuObserver() {
+            if (menuObserver) {
+                menuObserver.disconnect();
+            }
+
+            menuObserver = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    if (mutation.addedNodes.length) {
+                        const menu = document.querySelector('div[role="dialog"]');
+                        if (menu) {
+                            checkAndInjectButton();
+                        }
+                    }
+                }
+            });
+
+            menuObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+
+        function checkAndInjectButton() {
+    try {
+        const menuList = document.querySelector('div[role="dialog"] .x1y1aw1k');
+        if (!menuList) return false;
+        
+        const existingBtn = menuList.querySelector('[data-testid="freakygram-settings"]');
+        if (existingBtn) return false;
+
+        const templateButton = Array.from(menuList.children).find(el => 
+            el.textContent.includes('Settings') && 
+            !el.textContent.includes('Freakygram')
+        );
+        if (!templateButton) return false;
+
+        const settingsBtn = templateButton.cloneNode(true);
+        
+        settingsBtn.className = templateButton.className;
+        settingsBtn.setAttribute('data-testid', 'freakygram-settings');  
+        settingsBtn.setAttribute('role', 'button');
+        settingsBtn.setAttribute('tabindex', '0');
+        settingsBtn.style.backgroundColor = 'rgb(var(--ig-banner-background))';
+
+        const hoverDiv = settingsBtn.querySelector('div[role="none"]');
+        if (hoverDiv) {
+            // Keep Instagram's hover structure
+            hoverDiv.className = templateButton.querySelector('div[role="none"]').className;
+            hoverDiv.setAttribute('role', 'none');
+            hoverDiv.setAttribute('data-visualcompletion', 'ignore');
+            
+            const originalHoverStyles = window.getComputedStyle(templateButton.querySelector('div[role="none"]'));
+            hoverDiv.style.cssText = originalHoverStyles.cssText;
+            hoverDiv.style.backgroundColor = 'transparent';
+
+            settingsBtn.addEventListener('mouseenter', () => {
+                hoverDiv.style.backgroundColor = 'rgba(var(--ig-highlight-background),0.1)';
+            });
+            
+            settingsBtn.addEventListener('mouseleave', () => {
+                hoverDiv.style.backgroundColor = 'transparent';
+            });
+        }
+
+        const textSpan = settingsBtn.querySelector('span.x1lliihq span');
+        if (textSpan) textSpan.textContent = 'Freakygram Settings';
+
+        settingsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.electron.showSettings();
+        });
+
+        const switchAccountsBtn = Array.from(menuList.children).find(el => 
+            el.textContent.includes('Switch accounts')
+        );
+        if (!switchAccountsBtn) return false;
+
+        menuList.insertBefore(settingsBtn, switchAccountsBtn);
+        return true;
+    } catch (error) {
+        console.error('[Freakygram] Error:', error);
+        return false;
+    }
+}
+
+        setupMenuObserver();
+        checkAndInjectButton();
+
+        window.addEventListener('unload', () => {
+            if (menuObserver) {
+                menuObserver.disconnect();
+            }
+        });
+    })();
+    `;
+}
 
 function createWindow() {
     const defaultState = { width: 1200, height: 800, x: undefined, y: undefined };
     const windowState = store.get("windowState", defaultState);
+    const settings = settingsStore.store;
 
     mainWindow = new BrowserWindow({
         ...windowState,
@@ -199,14 +311,14 @@ function createWindow() {
     try {
         const ses = session.fromPartition('persist:instagram');
 
-        ses.setPermissionRequestHandler((webContents, permission, callback) => {
+        mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
             if (permission === 'notifications') {
-                callback(true);
+                callback(settings.notifications);
             } else {
                 callback(false);
             }
         });
-        
+
 
         mainWindow.webContents.on('context-menu', async (event, params) => {
             const { x, y } = params;
@@ -408,6 +520,9 @@ function createWindow() {
             ::-webkit-scrollbar-thumb:hover {
                 background: #363636;
             }
+            .xols6we {
+                height: 1px;
+            }
         `);
     });
 
@@ -449,14 +564,17 @@ function createWindow() {
 
     mainWindow.webContents.on('did-finish-load', () => {
         mainWindow.webContents.executeJavaScript(injectDownloadButton());
+        mainWindow.webContents.executeJavaScript(injectSettingsButton());
     });
     
     mainWindow.webContents.on('did-navigate-in-page', () => {
         mainWindow.webContents.executeJavaScript(injectDownloadButton());
+        mainWindow.webContents.executeJavaScript(injectSettingsButton());
     });
     
     mainWindow.webContents.on('did-navigate', () => {
         mainWindow.webContents.executeJavaScript(injectDownloadButton());
+        mainWindow.webContents.executeJavaScript(injectSettingsButton());
     });
     
     mainWindow.webContents.executeJavaScript(`
@@ -468,8 +586,87 @@ function createWindow() {
         });
     `);
 
+    mainWindow.webContents.executeJavaScript(`
+        window.addEventListener('hashchange', () => {
+            if (window._settingsButtonObserver) {
+                window._settingsButtonObserver.disconnect();
+            }
+            ${injectSettingsButton()}
+        });
+    `);
+
+    mainWindow.on('close', (event) => {
+        if (!isQuitting && settingsStore.get('closeToTray')) {
+            event.preventDefault();
+            mainWindow.hide();
+            return false;
+        }
+        store.set("windowState", mainWindow.getBounds());
+    });
+
+    isQuitting = !settings.closeToTray;
+
     return mainWindow;
 }
+
+ipcMain.on('show-settings', () => {
+    if (settingsWindow) {
+        settingsWindow.focus();
+        return;
+    }
+
+    settingsWindow = new BrowserWindow({
+        width: 400,
+        height: 500,
+        title: 'Freakygram Settings',
+        autoHideMenuBar: true,
+        parent: mainWindow,
+        modal: true,
+        webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        }
+    });
+
+    settingsWindow.loadFile('settings.html');
+    settingsWindow.once('ready-to-show', () => {
+        settingsWindow.show();
+    });
+
+    settingsWindow.on('closed', () => {
+        settingsWindow = null;
+    });
+});
+
+ipcMain.handle('get-settings', () => {
+    return settingsStore.store;
+});
+
+ipcMain.on('save-settings', (event, newSettings) => {
+    settingsStore.set(newSettings);
+    
+    if (mainWindow) {
+        isQuitting = !newSettings.closeToTray;
+    }
+    
+    if (mainWindow) {
+        mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+            if (permission === 'notifications') {
+                callback(newSettings.notifications);
+            } else {
+                callback(false);
+            }
+        });
+    }
+    
+    if (newSettings.discordRPC) {
+
+    }
+    
+    if (newSettings.autoUpdate) {
+    }
+});
 
 ipcMain.on('show-notification', (event, notification) => {
     new Notification({
