@@ -42,6 +42,8 @@
     "axios": "^1.7.9",
     "crypto": "^1.0.1",
     "electron-store": "^8.1.0",
-    "ig-downloader": "^1.1.4"
+    "ig-downloader": "^1.1.4",
+    "ps-node": "^0.1.6",
+    "ref-napi": "^3.0.3"
   }
 }
