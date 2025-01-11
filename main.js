@@ -28,7 +28,8 @@ const settingsStore = new Store({
         notifications: false,
         downloadPath: app.getPath('downloads'),
         discordRPC: false,
-        autoUpdate: true
+        autoUpdate: true,
+        alwaysOnTop: false
     }
 });
 
@@ -295,6 +296,7 @@ function createWindow() {
         frame: true,
         autoHideMenuBar: true,
         backgroundColor: '#000000',
+        alwaysOnTop: settings.alwaysOnTop,
         titleBarOverlay: {
             color: '#000000',
             symbolColor: '#FFFFFF'
@@ -609,6 +611,10 @@ function createWindow() {
     return mainWindow;
 }
 
+ipcMain.handle('get-version', () => {
+    return app.getVersion();
+});
+
 ipcMain.on('show-settings', () => {
     if (settingsWindow) {
         settingsWindow.focus();
@@ -618,6 +624,9 @@ ipcMain.on('show-settings', () => {
     settingsWindow = new BrowserWindow({
         width: 400,
         height: 500,
+        frame: true,
+        icon: path.join(__dirname, 'assets/icon.ico'),
+        autoHideMenuBar: true,
         title: 'Freakygram Settings',
         autoHideMenuBar: true,
         parent: mainWindow,
@@ -648,9 +657,7 @@ ipcMain.on('save-settings', (event, newSettings) => {
     
     if (mainWindow) {
         isQuitting = !newSettings.closeToTray;
-    }
-    
-    if (mainWindow) {
+        mainWindow.setAlwaysOnTop(newSettings.alwaysOnTop);
         mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
             if (permission === 'notifications') {
                 callback(newSettings.notifications);
@@ -662,9 +669,6 @@ ipcMain.on('save-settings', (event, newSettings) => {
     
     if (newSettings.discordRPC) {
 
-    }
-    
-    if (newSettings.autoUpdate) {
     }
 });
 

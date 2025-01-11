@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electron', {
     getSettings: () => ipcRenderer.invoke('get-settings'),
     saveSettings: (settings) => ipcRenderer.send('save-settings', settings),
     showSettings: () => ipcRenderer.send('show-settings'),
+    getVersion: () => ipcRenderer.invoke('get-version')
 });
 
 contextBridge.exposeInMainWorld('accounts', {

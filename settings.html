@@ -3,26 +3,66 @@
 <head>
     <title>Freakygram Settings</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            padding: 20px;
+            padding: 24px;
             background: #000;
             color: #fff;
+            line-height: 1.5;
         }
+
+        h2 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: #fff;
+        }
+
         .setting {
-            margin: 20px 0;
+            display: flex;
+            align-items: flex-start;
+            margin-bottom: 24px;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
         }
+
+        .setting-content {
+            flex-grow: 1;
+            margin-right: 16px;
+        }
+
+        .setting-title {
+            font-weight: 500;
+            margin-bottom: 4px;
+            color: #fff;
+        }
+
+        .setting-description {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
         .switch {
             position: relative;
             display: inline-block;
-            width: 60px;
-            height: 34px;
+            width: 44px;
+            height: 24px;
+            flex-shrink: 0;
         }
+
         .switch input {
             opacity: 0;
             width: 0;
             height: 0;
         }
+
         .slider {
             position: absolute;
             cursor: pointer;
@@ -30,67 +70,146 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background-color: #333;
-            transition: .4s;
-            border-radius: 34px;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 24px;
+            overflow: hidden;
         }
+
         .slider:before {
             position: absolute;
             content: "";
-            height: 26px;
-            width: 26px;
-            left: 4px;
-            bottom: 4px;
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
             background-color: white;
-            transition: .4s;
+            transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             border-radius: 50%;
+            z-index: 2;
         }
-        input:checked + .slider {
-            background-color: #0095f6;
+
+        .slider:after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, #00c6ff, #0072ff);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateX(-100%);
         }
+
+        input:checked + .slider:after {
+            transform: translateX(0);
+        }
+
         input:checked + .slider:before {
-            transform: translateX(26px);
+            transform: translateX(20px);
+        }
+
+        .coming-soon {
+            font-size: 12px;
+            color: #0095f6;
+            margin-left: 8px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 14px;
+            background: #000000;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #262626;
+            border-radius: 7px;
+            border: 3px solid #000000;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #363636;
+        }
+        .xols6we {
+            height: 1px;
+        }
+
+        .version-info {
+            bottom: 12px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 12px;
+            user-select: none;
         }
     </style>
 </head>
 <body>
-    <h2>Freakygram Settings</h2>
+    <h2><center>Freakygram Settings</center></h2>
     
     <div class="setting">
+        <div class="setting-content">
+            <div class="setting-title">Always On Top</div>
+            <div class="setting-description">Keep the Freakygram window always visible on top of other windows</div>
+        </div>
+        <label class="switch">
+            <input type="checkbox" id="alwaysOnTop">
+            <span class="slider"></span>
+        </label>
+    </div>
+
+    <div class="setting">
+        <div class="setting-content">
+            <div class="setting-title">Close to System Tray</div>
+            <div class="setting-description">When closing the window, minimize Freakygram to the system tray instead of quitting the application</div>
+        </div>
         <label class="switch">
             <input type="checkbox" id="closeToTray">
             <span class="slider"></span>
         </label>
-        <label>Close to System Tray</label>
     </div>
 
     <div class="setting">
-        <label class="switch">
-            <input type="checkbox" id="notifications">
-            <span class="slider"></span>
-        </label>
-        <label>Enable Notifications</label>
-    </div>
-
-    <div class="setting">
+        <div class="setting-content">
+            <div class="setting-title">Discord Rich Presence <span class="coming-soon">Coming Soon</span></div>
+            <div class="setting-description">Show your Freakygram status in Discord, including current activity and online time</div>
+        </div>
         <label class="switch">
             <input type="checkbox" id="discordRPC">
             <span class="slider"></span>
         </label>
-        <label>Discord RPC (Coming Soon)</label>
     </div>
 
     <div class="setting">
+        <div class="setting-content">
+            <div class="setting-title">Enable Notifications</div>
+            <div class="setting-description">Receive desktop notifications for new messages and important updates</div>
+        </div>
         <label class="switch">
-            <input type="checkbox" id="autoUpdate">
+            <input type="checkbox" id="notifications">
             <span class="slider"></span>
         </label>
-        <label>Auto Update</label>
+    </div>
+
+    <!-- <div class="setting"> -->
+        <!-- <div class="setting-content"> -->
+            <!-- <div class="setting-title">Auto Update</div> -->
+            <!-- <div class="setting-description">Automatically download and install updates when they become available</div> -->
+        <!-- </div> -->
+        <!-- <label class="switch"> -->
+            <!-- <input type="checkbox" id="autoUpdate"> -->
+            <!-- <span class="slider"></span> -->
+        <!-- </label> -->
+    <!-- </div> -->
+
+    <div class="version-info">
+        <span id="version">Freakygram v0.0.0</span>
     </div>
 
     <script>
         const init = async () => {
             const settings = await window.electron.getSettings();
+            const version = await window.electron.getVersion();
+            
+            document.getElementById('version').textContent = `Freakygram v${version}`;
             
             Object.entries(settings).forEach(([key, value]) => {
                 const element = document.getElementById(key);
