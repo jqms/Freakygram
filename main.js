@@ -206,6 +206,7 @@ function createWindow() {
                 callback(false);
             }
         });
+        
 
         mainWindow.webContents.on('context-menu', async (event, params) => {
             const { x, y } = params;
