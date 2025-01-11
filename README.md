@@ -22,7 +22,7 @@ I didn't like having to open a browser to access Instagram. Here's an Electron v
   Close to system tray, include a right-click menu.
 - ✅ **Notifications**:
   - Desktop notification support.
-- ❌ **Download Support**:  
+- ✅ **Download Support**:  
   - Save images or videos from feed or reels to storage.
 - ❌ **Update Checker**:  
   - Notify when a new version of the mod is available on GitHub.
