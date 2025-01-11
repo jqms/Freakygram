@@ -1,4 +1,4 @@
-# Instagram Desktop
+# Freakygram
 
 I didn't like having to open a browser to access Instagram. Here's an Electron version.
 
@@ -38,8 +38,8 @@ I didn't like having to open a browser to access Instagram. Here's an Electron v
 ### Steps
 1. Clone this repository:
    ```bash
-   git clone https://github.com/jqms/instagram-desktop
-   cd instagram-desktop-main
+   git clone https://github.com/jqms/Freakygram
+   cd Freakygram-main
    ```
 2. Install dependencies:
    ```bash
@@ -61,7 +61,7 @@ I didn't like having to open a browser to access Instagram. Here's an Electron v
 
 ## Development
 - **Static Assets**:
-  - Icons and other assets are in the `build` directory.
+  - Icons and other assets are in the `assets` directory.
 
 ### Scripts
 - `npm run start`: Launch the application.
