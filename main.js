@@ -1,6 +1,13 @@
 const { app, BrowserWindow, shell, ipcMain, session, Tray, Menu, dialog, nativeImage, clipboard } = require("electron");
 const Store = require("electron-store");
 const path = require("path");
+const axios = require('axios');
+const stream = require('stream');
+const util = require('util');
+const fs = require('fs');
+const fetch = require('node-fetch');
+const pipeline = util.promisify(stream.pipeline);
+const IgDownloader = require("ig-downloader").IgDownloader;
 
 const store = new Store({
     name: "config",
@@ -30,9 +37,142 @@ let accountWindow;
 let isQuitting = false;
 let tray = null;
 
+function createSvgIcon(svg) {
+    return nativeImage.createFromBuffer(Buffer.from(svg));
+}
+
+const fetchInstagramVideo = async (url) => {
+    try {
+        const data = await IgDownloader(url);
+        return data;
+    } catch (error) {
+        console.error("Failed to fetch video:", error);
+        return null;
+    }
+}
+
+async function download(url) {
+    try {
+        const videoData = await fetchInstagramVideo(url.replace("reels", "p"));
+        let filename = videoData.shortcode + '.mp4';
+        
+        const { canceled, filePath } = await dialog.showSaveDialog({
+            defaultPath: filename,
+            filters: [
+                { name: 'MP4 Videos', extensions: ['mp4'] },
+                { name: 'All Files', extensions: ['*'] }
+            ],
+            properties: ['createDirectory']
+        });
+
+        if (canceled) {
+            return { success: false, error: 'File save cancelled by user' };
+        }
+
+        const response = await fetch(videoData.video_url);
+        if (!response.ok) {
+            throw new Error(`Unexpected response: ${response.statusText}`);
+        }
+
+        const buffer = await response.buffer();
+        fs.writeFileSync(filePath, buffer);
+        
+        return { success: true, filePath };
+    } catch (error) {
+        console.error('Download error:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+const icons = {
+    copy: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4v8h8V4H4zM3 2h10v11H3V2zm-2 3h1v9h9v1H1V5z" fill="currentColor"/>
+    </svg>`,
+    browser: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2 2h12v12H2V2zm1 4h10v7H3V6zm0-3h10v2H3V3zm2 1h-1V3h1v1zm2 0H6V3h1v1zm2 0H8V3h1v1z" fill="currentColor"/>
+    </svg>`,
+    close: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M13.4 3.7L12 2.3 8 6.3 4 2.3 2.6 3.7 6.6 7.7l-4 4 1.4 1.4 4-4 4 4 1.4-1.4-4-4 4-4z" fill="currentColor"/>
+    </svg>`,
+    download: `<svg width="32" height="32" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M14 9.333a.667.667 0 0 0-.667.667v2.667a.667.667 0 0 1-.666.666H3.333a.667.667 0 0 1-.666-.666V10a.667.667 0 0 0-1.334 0v2.667A2 2 0 0 0 3.333 14.667h9.334A2 2 0 0 0 14.667 12.667V10A.667.667 0 0 0 14 9.333zm-6.473 1.14a.667.667 0 0 0 .22.14.627.627 0 0 0 .506 0 .667.667 0 0 0 .22-.14l2.667-2.666a.667.667 0 0 0-.946-.947L8.667 8.393V2a.667.667 0 0 0-1.334 0v6.393L5.807 6.86a.667.667 0 1 0-.947.947l2.667 2.666z" fill="currentColor"/>
+    </svg>`,
+};
 app.on('before-quit', () => {
     isQuitting = true;
 });
+
+function injectDownloadButton() {
+        return `
+        (function() {
+            function addDownloadButtons() {
+            if (!window.location.href.includes('reels')) return;
+                const shareBtns = document.querySelectorAll('[aria-label="Share"]');
+                
+                shareBtns.forEach(shareBtn => {
+                    const container = shareBtn?.parentElement?.parentElement;
+                    if (!container) return;
+                    
+                    const existingBtn = container.parentElement.querySelector('[data-testid="download-button"]');
+                    if (existingBtn) return;
+                    
+                    const newDownloadBtn = document.createElement('div');
+                    newDownloadBtn.setAttribute('data-testid', 'download-button');
+                    newDownloadBtn.className = container.className;
+                    newDownloadBtn.innerHTML = \`
+                        <div class="x1i10hfl x1qjc9v5 xjbqb8w xjqpnuy xa49m3k xqeqjp1 x2hbi6w x13fuv20 xu3j5b3 x1q0q8m5 x26u7qi x972fbf xcfux6l x1qhh985 xm0m39n x9f619 x1ypdohk xdl72j9 x2lah0s xe8uvvx xdj266r x11i5rnm xat24cr x1mh8g0r x2lwn1j xeuugli xexx8yu x4uap5 x18d9i69 xkhd6sd x1n2onr6 x16tdsg8 x1hl2dhg xggy1nq x1ja2u2z x1t137rt x1o1ewxj x3x9cwd x1e5q0jg x13rtm0m x3nfvp2 x1q0g3np x87ps6o x1lku1pv x1a2a7pz x1mywscw" role="button" tabindex="0">
+                            <svg aria-label="Download" class="x1lliihq x1n2onr6 xyb1xck" fill="currentColor" height="24" role="img" viewBox="0 0 24 24" width="24">
+                                <title>Download</title>
+                                <path d="M21,14a1,1,0,0,0-1,1v4a1,1,0,0,1-1,1H5a1,1,0,0,1-1-1V15a1,1,0,0,0-2,0v4a3,3,0,0,0,3,3H19a3,3,0,0,0,3-3V15A1,1,0,0,0,21,14Zm-9.71,1.71a1,1,0,0,0,.33.21.94.94,0,0,0,.76,0,1,1,0,0,0,.33-.21l4-4a1,1,0,0,0-1.42-1.42L13,12.59V3a1,1,0,0,0-2,0v9.59l-2.29-2.3a1,1,0,1,0-1.42,1.42Z"/>
+                            </svg>
+                        </div>
+                    \`;
+                    
+                    if (window.electron) {
+                        const clickHandler = async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            
+                            console.log('Download button clicked');
+                            try {
+                                const reelArticle = container.closest('article');
+                                const reelLink = window.location.href;
+                                
+                                if (reelLink) {
+                                    const videoUrl = reelLink;
+                                    console.log('Found video URL:', videoUrl);
+                                    const result = await window.electron.downloadVideo(videoUrl);
+                                    console.log('Download result:', result);
+                                } else {
+                                    console.error('No reel link found');
+                                }
+                            } catch (error) {
+                                console.error('Download failed:', error);
+                            }
+                        };
+    
+                        newDownloadBtn.querySelector('div').addEventListener('click', clickHandler);
+                        container.parentElement.insertBefore(newDownloadBtn, container.nextSibling);
+                    }
+                });
+            }
+
+        addDownloadButtons();
+
+        const observer = new MutationObserver((mutations) => {
+            addDownloadButtons();
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        window._downloadButtonObserver = observer;
+    })();
+    `;
+}
+
 
 function createWindow() {
     const defaultState = { width: 1200, height: 800, x: undefined, y: undefined };
@@ -69,7 +209,43 @@ function createWindow() {
 
         mainWindow.webContents.on('context-menu', async (event, params) => {
             const { x, y } = params;
-        
+            //console.log('Context menu event:', { x, y, params });
+            //try {
+            //    const currentUrl = await mainWindow.webContents.executeJavaScript(`window.location.href`);
+            //    console.log('Current URL:', currentUrl);
+            //
+            //    const menu = Menu.buildFromTemplate([
+            //        {
+            //            label: 'Save Video',
+            //            icon: createSvgIcon(icons.video),
+            //            click: async () => {
+            //                try {
+            //                    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+            //                        defaultPath: path.join(app.getPath('downloads'), `instagram_${Date.now()}.mp4`),
+            //                        filters: [{ name: 'Videos', extensions: ['mp4'] }]
+            //                    });
+            //
+            //                    if (!canceled && filePath) {
+            //                        const result = await download(currentUrl);
+            //                        if (result.success) {
+            //                            console.log('Video downloaded:', result.filePath);
+            //                        } else {
+            //                            throw new Error(result.error);
+            //                        }
+            //                    }
+            //                } catch (error) {
+            //                    console.error('Failed to save video:', error);
+            //                }
+            //            }
+            //        }
+            //    ]);
+            //
+            //    menu.popup();
+            //
+            //} catch (error) {
+            //    console.error('Context menu error:', error);
+            //}
+
             try {
                 const imageUrl = await mainWindow.webContents.executeJavaScript(`
                     (function() {
@@ -94,26 +270,6 @@ function createWindow() {
                             return 'instagram_image.jpg';
                         }
                     };
-
-                    function createSvgIcon(svg) {
-                        return nativeImage.createFromBuffer(Buffer.from(svg));
-                    }
-                    
-                    const icons = {
-                        download: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M8 12L3 7h3V2h4v5h3L8 12z M3 14v-2h10v2H3z" fill="currentColor"/>
-                        </svg>`,
-                        copy: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M5 2v9h9V2H5zM3 0h13v13H3V0z M0 3h2v13h13v-2H3V3H0v13h0z" fill="currentColor"/>
-                        </svg>`,
-                        browser: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M14 3H2v2h12V3zM2 14h12V7H2v7z M0 1h16v14H0V1z" fill="currentColor"/>
-                        </svg>`,
-                        close: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12.7 4.7l-1.4-1.4L8 6.6 4.7 3.3 3.3 4.7 6.6 8l-3.3 3.3 1.4 1.4L8 9.4l3.3 3.3 1.4-1.4L9.4 8l3.3-3.3z" fill="currentColor"/>
-                        </svg>`
-                    };
-
                     const menu = Menu.buildFromTemplate([
                         {
                             label: 'Save Image',
@@ -290,6 +446,27 @@ function createWindow() {
         store.set("windowState", mainWindow.getBounds());
     });
 
+    mainWindow.webContents.on('did-finish-load', () => {
+        mainWindow.webContents.executeJavaScript(injectDownloadButton());
+    });
+    
+    mainWindow.webContents.on('did-navigate-in-page', () => {
+        mainWindow.webContents.executeJavaScript(injectDownloadButton());
+    });
+    
+    mainWindow.webContents.on('did-navigate', () => {
+        mainWindow.webContents.executeJavaScript(injectDownloadButton());
+    });
+    
+    mainWindow.webContents.executeJavaScript(`
+        window.addEventListener('hashchange', () => {
+            if (window._downloadButtonObserver) {
+                window._downloadButtonObserver.disconnect();
+            }
+            ${injectDownloadButton()}
+        });
+    `);
+
     return mainWindow;
 }
 
@@ -328,6 +505,15 @@ function createTray() {
     });
 }
 
+ipcMain.handle('download-video', async (event, url) => {
+    try {
+        const result = await download(url);
+        return result;
+    } catch (error) {
+        console.error('Download error:', error);
+        throw error;
+    }
+});
 
 ipcMain.handle('get-current-account', () => {
     return store.get('currentAccount');

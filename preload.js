@@ -5,7 +5,8 @@ contextBridge.exposeInMainWorld('electron', {
     maximize: () => ipcRenderer.send('maximize'),
     close: () => ipcRenderer.send('close'),
     showAccounts: () => ipcRenderer.send('show-accounts'),
-    sendNotification: (notification) => ipcMain.emit('show-notification', notification)
+    sendNotification: (notification) => ipcRenderer.emit('show-notification', notification),
+    downloadVideo: (url) => ipcRenderer.invoke('download-video', url)
 });
 
 contextBridge.exposeInMainWorld('accounts', {
