@@ -40,6 +40,38 @@ function createWindow() {
     try {
         const ses = session.fromPartition('persist:instagram');
 
+        ses.setPermissionRequestHandler((webContents, permission, callback) => {
+            if (permission === 'notifications') {
+                callback(true);
+            } else {
+                callback(false);
+            }
+        });
+
+        mainWindow.webContents.on('did-finish-load', () => {
+            mainWindow.webContents.executeJavaScript(`
+                const oldNotification = window.Notification;
+                window.Notification = function(title, options) {
+                    if (options.icon && !options.icon.startsWith('http')) {
+                        options.icon = 'https://www.instagram.com' + options.icon;
+                    }
+                    const electronNotification = {
+                        title: title,
+                        body: options.body,
+                        icon: options.icon,
+                        silent: options.silent
+                    };
+                    window.electron.sendNotification(electronNotification);
+                    return new oldNotification(title, options);
+                };
+                window.Notification.requestPermission = function(cb) {
+                    if (cb) cb('granted');
+                    return Promise.resolve('granted');
+                };
+                window.Notification.permission = 'granted';
+            `);
+        });
+
         ses.webRequest.onBeforeSendHeaders((details, callback) => {
             callback({
                 requestHeaders: {
@@ -140,6 +172,14 @@ function createWindow() {
     return mainWindow;
 }
 
+ipcMain.on('show-notification', (event, notification) => {
+    new Notification({
+        title: notification.title,
+        body: notification.body,
+        icon: notification.icon,
+        silent: notification.silent
+    }).show();
+});
 
 ipcMain.handle('get-current-account', () => {
     return store.get('currentAccount');

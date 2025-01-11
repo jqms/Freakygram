@@ -4,7 +4,8 @@ contextBridge.exposeInMainWorld('electron', {
     minimize: () => ipcRenderer.send('minimize'),
     maximize: () => ipcRenderer.send('maximize'),
     close: () => ipcRenderer.send('close'),
-    showAccounts: () => ipcRenderer.send('show-accounts')
+    showAccounts: () => ipcRenderer.send('show-accounts'),
+    sendNotification: (notification) => ipcMain.emit('show-notification', notification)
 });
 
 contextBridge.exposeInMainWorld('accounts', {
