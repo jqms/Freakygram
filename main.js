@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, session, Tray, Menu } = require("electron");
+const { app, BrowserWindow, shell, ipcMain, session, Tray, Menu, dialog, nativeImage, clipboard } = require("electron");
 const Store = require("electron-store");
 const path = require("path");
 
@@ -64,6 +64,125 @@ function createWindow() {
                 callback(true);
             } else {
                 callback(false);
+            }
+        });
+
+        mainWindow.webContents.on('context-menu', async (event, params) => {
+            const { x, y } = params;
+        
+            try {
+                const imageUrl = await mainWindow.webContents.executeJavaScript(`
+                    (function() {
+                        const element = document.elementFromPoint(${x}, ${y});
+                        const container = element.closest('._aagu');
+                        if (container) {
+                            const img = container.querySelector('._aagv img');
+                            return img ? img.src : null;
+                        }
+                        return null;
+                    })()
+                `);
+        
+                if (imageUrl) {
+                    const getFilename = (url) => {
+                        try {
+                            const urlObj = new URL(url);
+                            const pathParts = urlObj.pathname.split('/');
+                            const filename = pathParts[pathParts.length - 1];
+                            return filename.split('?')[0].replace(/[^\w\-_.]/g, '');
+                        } catch (e) {
+                            return 'instagram_image.jpg';
+                        }
+                    };
+
+                    function createSvgIcon(svg) {
+                        return nativeImage.createFromBuffer(Buffer.from(svg));
+                    }
+                    
+                    const icons = {
+                        download: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M8 12L3 7h3V2h4v5h3L8 12z M3 14v-2h10v2H3z" fill="currentColor"/>
+                        </svg>`,
+                        copy: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 2v9h9V2H5zM3 0h13v13H3V0z M0 3h2v13h13v-2H3V3H0v13h0z" fill="currentColor"/>
+                        </svg>`,
+                        browser: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M14 3H2v2h12V3zM2 14h12V7H2v7z M0 1h16v14H0V1z" fill="currentColor"/>
+                        </svg>`,
+                        close: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12.7 4.7l-1.4-1.4L8 6.6 4.7 3.3 3.3 4.7 6.6 8l-3.3 3.3 1.4 1.4L8 9.4l3.3 3.3 1.4-1.4L9.4 8l3.3-3.3z" fill="currentColor"/>
+                        </svg>`
+                    };
+
+                    const menu = Menu.buildFromTemplate([
+                        {
+                            label: 'Save Image',
+                            icon: createSvgIcon(icons.download),
+                            click: async () => {
+                                try {
+                                    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+                                        defaultPath: path.join(app.getPath('downloads'), getFilename(imageUrl)),
+                                        filters: [
+                                            { name: 'Images', extensions: ['jpg', 'png', 'gif', 'webp'] }
+                                        ]
+                                    });
+                    
+                                    if (!canceled && filePath) {
+                                        mainWindow.webContents.downloadURL(imageUrl);
+                                        mainWindow.webContents.session.on('will-download', (event, item) => {
+                                            item.setSavePath(filePath);
+                                        });
+                                    }
+                                } catch (error) {
+                                    console.error('Failed to save image:', error);
+                                }
+                            }
+                        },
+                        {
+                            label: 'Copy Image',
+                            icon: createSvgIcon(icons.copy),
+                            click: async () => {
+                                try {
+                                    const imageData = await mainWindow.webContents.executeJavaScript(`
+                                        (function() {
+                                            const element = document.elementFromPoint(${x}, ${y});
+                                            const img = element.closest('._aagu').querySelector('._aagv img');
+                                            return img ? {
+                                                src: img.src,
+                                                naturalWidth: img.naturalWidth,
+                                                naturalHeight: img.naturalHeight
+                                            } : null;
+                                        })()
+                                    `);
+                        
+                                    if (imageData) {
+                                        await mainWindow.webContents.copyImageAt(x, y);
+                                        
+                                        if (!clipboard.availableFormats().includes('image/png')) {
+                                            const response = await fetch(imageData.src);
+                                            const buffer = Buffer.from(await response.arrayBuffer());
+                                            clipboard.writeImage(nativeImage.createFromBuffer(buffer));
+                                        }
+                                    }
+                                } catch (error) {
+                                    console.error('Copy failed:', error);
+                                }
+                            }
+                        },
+                        { type: 'separator' },
+                        {
+                            label: 'Open in Browser',
+                            icon: createSvgIcon(icons.browser),
+                            click: () => {
+                                shell.openExternal(imageUrl);
+                            }
+                        },
+                        { type: 'separator' }
+                    ]);
+                    menu.popup();
+                }
+            } catch (error) {
+                console.error('Context menu error:', error);
             }
         });
 
