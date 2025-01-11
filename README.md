@@ -26,6 +26,9 @@ I didn't like having to open a browser to access Instagram. Here's an Electron v
   - Save images or videos from feed or reels to storage.
 - **Update Checker**:  
   - Notify when a new version of the mod is available on GitHub.
+- **Always On Top**:
+  - Make the window always be the top window.
+    - Kind of annoying when downloading videos.
 
 ---
 
@@ -33,8 +36,6 @@ I didn't like having to open a browser to access Instagram. Here's an Electron v
 - ❌ **Discord RPC**:  
   - Discord RPC to show that you are Instagram-ing...?
   - Would show the current reel name I guess.
-- ❌ **Always On Top**:  
-  - Setting to make the window always be on top.
 ---
 
 ## Installation
