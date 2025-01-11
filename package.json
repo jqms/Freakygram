@@ -1,0 +1,37 @@
+{
+    "name": "instagram-desktop",
+    "version": "1.0.0",
+    "main": "main.js",
+    "scripts": {
+        "start": "electron .",
+        "build": "electron-builder",
+        "debug": "electron . --debug"
+    },
+    "build": {
+        "appId": "com.instagram.desktop",
+        "productName": "Instagram Desktop",
+        "win": {
+            "target": "nsis",
+            "icon": "./build/icon.ico"
+        },
+        "files": [
+            "**/*",
+            "build/icon.ico"
+        ],
+        "extraResources": [
+            "build/icon.ico"
+        ],
+        "directories": {
+            "buildResources": "build"
+        },
+        "asar": true
+    },
+    "devDependencies": {
+        "electron": "^28.2.0",
+        "electron-builder": "^25.1.8"
+    },
+    "dependencies": {
+        "crypto": "^1.0.1",
+        "electron-store": "^8.1.0"
+    }
+}
