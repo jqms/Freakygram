@@ -13,194 +13,234 @@ const pipeline = util.promisify(stream.pipeline);
 const IgDownloader = require("ig-downloader").IgDownloader;
 const Updater = require('./updater');
 
-const store = new Store({
-    name: "config",
-    encryptionKey: "instagram-desktop-app",
-    clearInvalidConfig: true,
-    defaults: {
-        windowState: { width: 1200, height: 800 },
-        accounts: [],
-        currentAccount: null
-    },
-});
+const gotTheLock = app.requestSingleInstanceLock();
 
-const settingsStore = new Store({
-    name: "settings",
-    defaults: {
-        closeToTray: false,
-        notifications: false,
-        downloadPath: app.getPath('downloads'),
-        discordRPC: false,
-        autoUpdate: true,
-        alwaysOnTop: false
-    }
-});
+if (!gotTheLock) {
+    app.quit();
+} else {
+    app.on('second-instance', (event, commandLine, workingDirectory) => {
+        if (mainWindow) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+        }
+    });
 
-const accountStores = new Map();
-function getAccountStore(username) {
-    if (!accountStores.has(username)) {
-        accountStores.set(username, new Store({
-            name: `account_${username}`,
-            encryptionKey: "instagram-desktop-app",
-            defaults: {}
-        }));
-    }
-    return accountStores.get(username);
-}
-
-let currentActivity = 'browsing';
-let rpcStartTimestamp = Date.now();
-
-async function initDiscordRPC() {
-    try {
-        if (rpc) {
-            try {
-                await rpc.destroy().catch(() => {});
-            } catch (e) {}
-            rpc = null;
+    app.whenReady().then(async () => {
+        const trayIconPath = path.join(__dirname, 'assets', 'tray.png');
+        if (!require('fs').existsSync(trayIconPath)) {
+            throw new Error('Required tray icon missing');
         }
 
-        rpc = new DiscordRPC.Client({ transport: 'ipc' });
-        
-        rpc.on('ready', () => {
-            isRPCConnected = true;
-            updateRPCActivity(currentActivity);
-        });
+        if (settingsStore.get('autoUpdate')) {
+            const updater = new Updater();
+            await updater.checkForUpdates();
+        }
 
-        rpc.on('disconnected', () => {
+        if (settingsStore.get('discordRPC')) {
+            initDiscordRPC();
+        }
+
+        app.setName("Instagram Desktop");
+        mainWindow = createWindow();
+        createTray();
+
+        if (process.platform === "win32") {
+            mainWindow.setIcon(path.join(__dirname, "assets", "icon.ico"));
+        }
+    }).catch(error => {
+        console.error('Failed to initialize app:', error);
+        app.quit();
+    });
+
+
+    const store = new Store({
+        name: "config",
+        encryptionKey: "instagram-desktop-app",
+        clearInvalidConfig: true,
+        defaults: {
+            windowState: { width: 1200, height: 800 },
+            accounts: [],
+            currentAccount: null
+        },
+    });
+
+    const settingsStore = new Store({
+        name: "settings",
+        defaults: {
+            closeToTray: false,
+            notifications: false,
+            downloadPath: app.getPath('downloads'),
+            discordRPC: false,
+            autoUpdate: true,
+            alwaysOnTop: false
+        }
+    });
+
+    const accountStores = new Map();
+    function getAccountStore(username) {
+        if (!accountStores.has(username)) {
+            accountStores.set(username, new Store({
+                name: `account_${username}`,
+                encryptionKey: "instagram-desktop-app",
+                defaults: {}
+            }));
+        }
+        return accountStores.get(username);
+    }
+
+    let currentActivity = 'browsing';
+    let rpcStartTimestamp = Date.now();
+
+    async function initDiscordRPC() {
+        try {
+            if (rpc) {
+                try {
+                    await rpc.destroy().catch(() => { });
+                } catch (e) { }
+                rpc = null;
+            }
+
+            rpc = new DiscordRPC.Client({ transport: 'ipc' });
+
+            rpc.on('ready', () => {
+                isRPCConnected = true;
+                updateRPCActivity(currentActivity);
+            });
+
+            rpc.on('disconnected', () => {
+                isRPCConnected = false;
+                rpc = null;
+            });
+
+            await rpc.login({ clientId }).catch(console.error);
+        } catch (error) {
+            console.error('Discord RPC Error:', error);
             isRPCConnected = false;
             rpc = null;
+        }
+    }
+
+    async function destroyRPC() {
+        if (!rpc) return;
+
+        try {
+            isRPCConnected = false;
+            await rpc.destroy().catch(() => { });
+        } catch (error) {
+            console.error('Error destroying RPC:', error);
+        } finally {
+            rpc = null;
+        }
+    }
+
+    function updateRPCActivity(activity) {
+        if (!rpc || !isRPCConnected) return;
+        currentActivity = activity;
+        const activities = {
+            browsing: {
+                details: 'Browsing Feed',
+                largeImageKey: "instagram",
+                smallImageKey: 'feed',
+            },
+            reels: {
+                details: 'Watching Reels',
+                largeImageKey: "instagram",
+                smallImageKey: 'reels',
+                smallImageText: 'Reels'
+            },
+            messages: {
+                details: 'Reading Messages',
+                largeImageKey: "instagram",
+                smallImageKey: 'messages',
+                smallImageText: 'Messages'
+            }
+        };
+
+        rpc.setActivity({
+            ...activities[activity],
+            startTimestamp: rpcStartTimestamp,
+            largeImageKey: 'instagram',
+            largeImageText: 'Freakygram',
+            buttons: [
+                { label: 'Download App', url: 'https://github.com/jqms/Freakygram/releases' }
+            ]
         });
-
-        await rpc.login({ clientId }).catch(console.error);
-    } catch (error) {
-        console.error('Discord RPC Error:', error);
-        isRPCConnected = false;
-        rpc = null;
     }
-}
 
-async function destroyRPC() {
-    if (!rpc) return;
 
-    try {
-        isRPCConnected = false;
-        await rpc.destroy().catch(() => {});
-    } catch (error) {
-        console.error('Error destroying RPC:', error);
-    } finally {
-        rpc = null;
+    let mainWindow;
+    let accountWindow;
+    let isQuitting = false;
+    let tray = null;
+    let settingsWindow = null;
+
+    function createSvgIcon(svg) {
+        return nativeImage.createFromBuffer(Buffer.from(svg));
     }
-}
 
-function updateRPCActivity(activity) {
-    if (!rpc || !isRPCConnected) return;
-    currentActivity = activity;
-    const activities = {
-        browsing: {
-            details: 'Browsing Feed',
-            largeImageKey: "instagram",
-            smallImageKey: 'feed',
-        },
-        reels: {
-            details: 'Watching Reels',
-            largeImageKey: "instagram",
-            smallImageKey: 'reels',
-            smallImageText: 'Reels'
-        },
-        messages: {
-            details: 'Reading Messages',
-            largeImageKey: "instagram",
-            smallImageKey: 'messages',
-            smallImageText: 'Messages'
+    const fetchInstagramVideo = async (url) => {
+        try {
+            const data = await IgDownloader(url);
+            return data;
+        } catch (error) {
+            console.error("Failed to fetch video:", error);
+            return null;
         }
-    };
-
-    rpc.setActivity({
-        ...activities[activity],
-        startTimestamp: rpcStartTimestamp,
-        largeImageKey: 'instagram',
-        largeImageText: 'Freakygram',
-        buttons: [
-            { label: 'Download App', url: 'https://github.com/jqms/Freakygram/releases' }
-        ]
-    });
-}
-
-
-let mainWindow;
-let accountWindow;
-let isQuitting = false;
-let tray = null;
-let settingsWindow = null;
-
-function createSvgIcon(svg) {
-    return nativeImage.createFromBuffer(Buffer.from(svg));
-}
-
-const fetchInstagramVideo = async (url) => {
-    try {
-        const data = await IgDownloader(url);
-        return data;
-    } catch (error) {
-        console.error("Failed to fetch video:", error);
-        return null;
     }
-}
 
-async function download(url) {
-    try {
-        const videoData = await fetchInstagramVideo(url.replace("reels", "p"));
-        let filename = videoData.shortcode + '.mp4';
-        
-        const { canceled, filePath } = await dialog.showSaveDialog({
-            defaultPath: filename,
-            filters: [
-                { name: 'MP4 Videos', extensions: ['mp4'] },
-                { name: 'All Files', extensions: ['*'] }
-            ],
-            properties: ['createDirectory']
-        });
+    async function download(url) {
+        try {
+            const videoData = await fetchInstagramVideo(url.replace("reels", "p"));
+            let filename = videoData.shortcode + '.mp4';
 
-        if (canceled) {
-            return { success: false, error: 'File save cancelled by user' };
+            const { canceled, filePath } = await dialog.showSaveDialog({
+                defaultPath: filename,
+                filters: [
+                    { name: 'MP4 Videos', extensions: ['mp4'] },
+                    { name: 'All Files', extensions: ['*'] }
+                ],
+                properties: ['createDirectory']
+            });
+
+            if (canceled) {
+                return { success: false, error: 'File save cancelled by user' };
+            }
+
+            const response = await fetch(videoData.video_url);
+            if (!response.ok) {
+                throw new Error(`Unexpected response: ${response.statusText}`);
+            }
+
+            const buffer = await response.buffer();
+            fs.writeFileSync(filePath, buffer);
+
+            return { success: true, filePath };
+        } catch (error) {
+            console.error('Download error:', error);
+            return { success: false, error: error.message };
         }
-
-        const response = await fetch(videoData.video_url);
-        if (!response.ok) {
-            throw new Error(`Unexpected response: ${response.statusText}`);
-        }
-
-        const buffer = await response.buffer();
-        fs.writeFileSync(filePath, buffer);
-        
-        return { success: true, filePath };
-    } catch (error) {
-        console.error('Download error:', error);
-        return { success: false, error: error.message };
     }
-}
 
-const icons = {
-    copy: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    const icons = {
+        copy: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M4 4v8h8V4H4zM3 2h10v11H3V2zm-2 3h1v9h9v1H1V5z" fill="currentColor"/>
     </svg>`,
-    browser: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        browser: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M2 2h12v12H2V2zm1 4h10v7H3V6zm0-3h10v2H3V3zm2 1h-1V3h1v1zm2 0H6V3h1v1zm2 0H8V3h1v1z" fill="currentColor"/>
     </svg>`,
-    close: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        close: `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M13.4 3.7L12 2.3 8 6.3 4 2.3 2.6 3.7 6.6 7.7l-4 4 1.4 1.4 4-4 4 4 1.4-1.4-4-4 4-4z" fill="currentColor"/>
     </svg>`,
-    download: `<svg width="32" height="32" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        download: `<svg width="32" height="32" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M14 9.333a.667.667 0 0 0-.667.667v2.667a.667.667 0 0 1-.666.666H3.333a.667.667 0 0 1-.666-.666V10a.667.667 0 0 0-1.334 0v2.667A2 2 0 0 0 3.333 14.667h9.334A2 2 0 0 0 14.667 12.667V10A.667.667 0 0 0 14 9.333zm-6.473 1.14a.667.667 0 0 0 .22.14.627.627 0 0 0 .506 0 .667.667 0 0 0 .22-.14l2.667-2.666a.667.667 0 0 0-.946-.947L8.667 8.393V2a.667.667 0 0 0-1.334 0v6.393L5.807 6.86a.667.667 0 1 0-.947.947l2.667 2.666z" fill="currentColor"/>
     </svg>`,
-};
-app.on('before-quit', () => {
-    isQuitting = true;
-    destroyRPC();
-});
+    };
+    app.on('before-quit', () => {
+        isQuitting = true;
+        destroyRPC();
+    });
 
-function injectDownloadButton() {
+    function injectDownloadButton() {
         return `
         (function() {
             function addDownloadButtons() {
@@ -266,10 +306,10 @@ function injectDownloadButton() {
         window._downloadButtonObserver = observer;
     })();
     `;
-}
+    }
 
-function injectSettingsButton() {
-    return `
+    function injectSettingsButton() {
+        return `
     (function() {
         let menuObserver = null;
         
@@ -368,10 +408,10 @@ function injectSettingsButton() {
         });
     })();
     `;
-}
+    }
 
-function getStoryMedia(x, y) {
-    return `
+    function getStoryMedia(x, y) {
+        return `
         (function() {
             const element = document.elementFromPoint(${x}, ${y});
             const storyContainer = element.closest('.x5yr21d.x1n2onr6.xh8yej3');
@@ -399,10 +439,10 @@ function getStoryMedia(x, y) {
             return null;
         })()
     `;
-}
+    }
 
-function getFeedVideo(x, y) {
-    return `
+    function getFeedVideo(x, y) {
+        return `
     (function() {
         try {
             let element = document.elementFromPoint(${x}, ${y});
@@ -431,161 +471,163 @@ function getFeedVideo(x, y) {
             return null;
         }
     })()`;
-}
+    }
 
-function createWindow() {
-    const defaultState = { width: 1200, height: 800, x: undefined, y: undefined };
-    const windowState = store.get("windowState", defaultState);
-    const settings = settingsStore.store;
+    function createWindow() {
+        const defaultState = { width: 1200, height: 800, x: undefined, y: undefined };
+        const windowState = store.get("windowState", defaultState);
+        const settings = settingsStore.store;
 
-    mainWindow = new BrowserWindow({
-        ...windowState,
-        frame: true,
-        autoHideMenuBar: true,
-        backgroundColor: '#000000',
-        alwaysOnTop: settings.alwaysOnTop,
-        titleBarOverlay: {
-            color: '#000000',
-            symbolColor: '#FFFFFF'
-        },
-        webPreferences: {
-            preload: path.join(__dirname, "preload.js"),
-            nodeIntegration: false,
-            contextIsolation: true,
-            partition: 'persist:instagram',
-            webSecurity: true
-        }
-    });
-
-    try {
-        const ses = session.fromPartition('persist:instagram');
-
-        mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-            if (permission === 'notifications') {
-                callback(settings.notifications);
-            } else {
-                callback(false);
+        mainWindow = new BrowserWindow({
+            ...windowState,
+            frame: true,
+            autoHideMenuBar: true,
+            backgroundColor: '#000000',
+            alwaysOnTop: settings.alwaysOnTop,
+            titleBarOverlay: {
+                color: '#000000',
+                symbolColor: '#FFFFFF'
+            },
+            webPreferences: {
+                preload: path.join(__dirname, "preload.js"),
+                nodeIntegration: false,
+                contextIsolation: true,
+                partition: 'persist:instagram',
+                webSecurity: true
             }
         });
 
+        try {
+            const ses = session.fromPartition('persist:instagram');
 
-        mainWindow.webContents.on('context-menu', async (event, params) => {
-            const { x, y } = params;
-            //console.log('Context menu event:', { x, y, params });
-            //try {
-            //    const currentUrl = await mainWindow.webContents.executeJavaScript(`window.location.href`);
-            //    console.log('Current URL:', currentUrl);
-            //
-            //    const menu = Menu.buildFromTemplate([
-            //        {
-            //            label: 'Save Video',
-            //            icon: createSvgIcon(icons.video),
-            //            click: async () => {
-            //                try {
-            //                    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-            //                        defaultPath: path.join(app.getPath('downloads'), `instagram_${Date.now()}.mp4`),
-            //                        filters: [{ name: 'Videos', extensions: ['mp4'] }]
-            //                    });
-            //
-            //                    if (!canceled && filePath) {
-            //                        const result = await download(currentUrl);
-            //                        if (result.success) {
-            //                            console.log('Video downloaded:', result.filePath);
-            //                        } else {
-            //                            throw new Error(result.error);
-            //                        }
-            //                    }
-            //                } catch (error) {
-            //                    console.error('Failed to save video:', error);
-            //                }
-            //            }
-            //        }
-            //    ]);
-            //
-            //    menu.popup();
-            //
-            //} catch (error) {
-            //    console.error('Context menu error:', error);
-            //}
-            function upperFirstLetter(string) {
-                return string.charAt(0).toUpperCase() + string.slice(1);
-            }
-            try {
-                const storyMedia = await mainWindow.webContents.executeJavaScript(getStoryMedia(params.x, params.y));
-        
-                if (storyMedia) {
-                    const menu = Menu.buildFromTemplate([
-                        {
-                            label: `Copy ${upperFirstLetter(storyMedia.type)}`,
-                            icon: createSvgIcon(icons.copy),
-                            click: async () => {
-                                try {
-                                    if (storyMedia.type === 'image') {
-                                        await mainWindow.webContents.copyImageAt(x, y);
-                                    } else {
-                                        await mainWindow.webContents.copyVideoAt(x, y);
-                                    }
-                                } catch (error) {
-                                    console.error('Copy failed:', error);
-                                }
-                            }
-                        },
-                        {
-                            label: `Save ${upperFirstLetter(storyMedia.type)}`,
-                            icon: createSvgIcon(icons.download),
-                            click: async () => {
-                                const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-                                    defaultPath: path.join(
-                                        app.getPath('downloads'), 
-                                        `instagram_story_${storyMedia.username}_${Date.now()}.${storyMedia.type === 'video' ? 'mp4' : 'jpg'}`
-                                    ),
-                                    filters: [
-                                        { name: storyMedia.type === 'video' ? 'Video' : 'Image', 
-                                          extensions: [storyMedia.type === 'video' ? 'mp4' : 'jpg'] }
-                                    ]
-                                });
-        
-                                if (!canceled && filePath) {
-                                    mainWindow.webContents.downloadURL(storyMedia.url);
-                                    mainWindow.webContents.session.on('will-download', (event, item) => {
-                                        item.setSavePath(filePath);
-                                    });
-                                }
-                            }
-                        },
-                        {
-                            label: 'Copy URL',
-                            icon: createSvgIcon(icons.copy),
-                            click: () => clipboard.writeText(storyMedia.url)
-                        }
-                    ]);
-        
-                    menu.popup();
+            mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+                if (permission === 'notifications') {
+                    callback(settings.notifications);
+                } else {
+                    callback(false);
                 }
+            });
 
-                //const feedVideo = await mainWindow.webContents.executeJavaScript(getFeedVideo(params.x, params.y));
-                //if (feedVideo && feedVideo.postId) {
+
+            mainWindow.webContents.on('context-menu', async (event, params) => {
+                const { x, y } = params;
+                //console.log('Context menu event:', { x, y, params });
+                //try {
+                //    const currentUrl = await mainWindow.webContents.executeJavaScript(`window.location.href`);
+                //    console.log('Current URL:', currentUrl);
+                //
                 //    const menu = Menu.buildFromTemplate([
                 //        {
                 //            label: 'Save Video',
-                //            icon: createSvgIcon(icons.download),
+                //            icon: createSvgIcon(icons.video),
                 //            click: async () => {
-                //                const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-                //                    defaultPath: path.join(app.getPath('downloads'), 
-                //                        `instagram_${feedVideo.username}_${Date.now()}.mp4`),
-                //                    filters: [{ name: 'Videos', extensions: ['mp4'] }]
-                //                });
+                //                try {
+                //                    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+                //                        defaultPath: path.join(app.getPath('downloads'), `instagram_${Date.now()}.mp4`),
+                //                        filters: [{ name: 'Videos', extensions: ['mp4'] }]
+                //                    });
                 //
-                //                if (!canceled && filePath) {
-                //                    await download(`https://www.instagram.com/p/${feedVideo.postId}/`);
+                //                    if (!canceled && filePath) {
+                //                        const result = await download(currentUrl);
+                //                        if (result.success) {
+                //                            console.log('Video downloaded:', result.filePath);
+                //                        } else {
+                //                            throw new Error(result.error);
+                //                        }
+                //                    }
+                //                } catch (error) {
+                //                    console.error('Failed to save video:', error);
                 //                }
                 //            }
                 //        }
                 //    ]);
+                //
                 //    menu.popup();
+                //
+                //} catch (error) {
+                //    console.error('Context menu error:', error);
                 //}
+                function upperFirstLetter(string) {
+                    return string.charAt(0).toUpperCase() + string.slice(1);
+                }
+                try {
+                    const storyMedia = await mainWindow.webContents.executeJavaScript(getStoryMedia(params.x, params.y));
 
-                const imageUrl = await mainWindow.webContents.executeJavaScript(`
+                    if (storyMedia) {
+                        const menu = Menu.buildFromTemplate([
+                            {
+                                label: `Copy ${upperFirstLetter(storyMedia.type)}`,
+                                icon: createSvgIcon(icons.copy),
+                                click: async () => {
+                                    try {
+                                        if (storyMedia.type === 'image') {
+                                            await mainWindow.webContents.copyImageAt(x, y);
+                                        } else {
+                                            await mainWindow.webContents.copyVideoAt(x, y);
+                                        }
+                                    } catch (error) {
+                                        console.error('Copy failed:', error);
+                                    }
+                                }
+                            },
+                            {
+                                label: `Save ${upperFirstLetter(storyMedia.type)}`,
+                                icon: createSvgIcon(icons.download),
+                                click: async () => {
+                                    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+                                        defaultPath: path.join(
+                                            app.getPath('downloads'),
+                                            `instagram_story_${storyMedia.username}_${Date.now()}.${storyMedia.type === 'video' ? 'mp4' : 'jpg'}`
+                                        ),
+                                        filters: [
+                                            {
+                                                name: storyMedia.type === 'video' ? 'Video' : 'Image',
+                                                extensions: [storyMedia.type === 'video' ? 'mp4' : 'jpg']
+                                            }
+                                        ]
+                                    });
+
+                                    if (!canceled && filePath) {
+                                        mainWindow.webContents.downloadURL(storyMedia.url);
+                                        mainWindow.webContents.session.on('will-download', (event, item) => {
+                                            item.setSavePath(filePath);
+                                        });
+                                    }
+                                }
+                            },
+                            {
+                                label: 'Copy URL',
+                                icon: createSvgIcon(icons.copy),
+                                click: () => clipboard.writeText(storyMedia.url)
+                            }
+                        ]);
+
+                        menu.popup();
+                    }
+
+                    //const feedVideo = await mainWindow.webContents.executeJavaScript(getFeedVideo(params.x, params.y));
+                    //if (feedVideo && feedVideo.postId) {
+                    //    const menu = Menu.buildFromTemplate([
+                    //        {
+                    //            label: 'Save Video',
+                    //            icon: createSvgIcon(icons.download),
+                    //            click: async () => {
+                    //                const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+                    //                    defaultPath: path.join(app.getPath('downloads'), 
+                    //                        `instagram_${feedVideo.username}_${Date.now()}.mp4`),
+                    //                    filters: [{ name: 'Videos', extensions: ['mp4'] }]
+                    //                });
+                    //
+                    //                if (!canceled && filePath) {
+                    //                    await download(`https://www.instagram.com/p/${feedVideo.postId}/`);
+                    //                }
+                    //            }
+                    //        }
+                    //    ]);
+                    //    menu.popup();
+                    //}
+
+                    const imageUrl = await mainWindow.webContents.executeJavaScript(`
                     (function() {
                         const element = document.elementFromPoint(${x}, ${y});
                         const container = element.closest('._aagu');
@@ -596,25 +638,25 @@ function createWindow() {
                         return null;
                     })()
                 `);
-        
-                if (imageUrl) {
-                    const getFilename = (url) => {
-                        try {
-                            const urlObj = new URL(url);
-                            const pathParts = urlObj.pathname.split('/');
-                            const filename = pathParts[pathParts.length - 1];
-                            return filename.split('?')[0].replace(/[^\w\-_.]/g, '');
-                        } catch (e) {
-                            return 'instagram_image.jpg';
-                        }
-                    };
-                    const menu = Menu.buildFromTemplate([
-                        {
-                            label: 'Copy Image',
-                            icon: createSvgIcon(icons.copy),
-                            click: async () => {
-                                try {
-                                    const imageData = await mainWindow.webContents.executeJavaScript(`
+
+                    if (imageUrl) {
+                        const getFilename = (url) => {
+                            try {
+                                const urlObj = new URL(url);
+                                const pathParts = urlObj.pathname.split('/');
+                                const filename = pathParts[pathParts.length - 1];
+                                return filename.split('?')[0].replace(/[^\w\-_.]/g, '');
+                            } catch (e) {
+                                return 'instagram_image.jpg';
+                            }
+                        };
+                        const menu = Menu.buildFromTemplate([
+                            {
+                                label: 'Copy Image',
+                                icon: createSvgIcon(icons.copy),
+                                click: async () => {
+                                    try {
+                                        const imageData = await mainWindow.webContents.executeJavaScript(`
                                         (function() {
                                             const element = document.elementFromPoint(${x}, ${y});
                                             const img = element.closest('._aagu').querySelector('._aagv img');
@@ -625,63 +667,63 @@ function createWindow() {
                                             } : null;
                                         })()
                                     `);
-                        
-                                    if (imageData) {
-                                        await mainWindow.webContents.copyImageAt(x, y);
-                                        
-                                        if (!clipboard.availableFormats().includes('image/png')) {
-                                            const response = await fetch(imageData.src);
-                                            const buffer = Buffer.from(await response.arrayBuffer());
-                                            clipboard.writeImage(nativeImage.createFromBuffer(buffer));
-                                        }
-                                    }
-                                } catch (error) {
-                                    console.error('Copy failed:', error);
-                                }
-                            }
-                        },
-                        {
-                            label: 'Save Image',
-                            icon: createSvgIcon(icons.download),
-                            click: async () => {
-                                try {
-                                    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-                                        defaultPath: path.join(app.getPath('downloads'), getFilename(imageUrl)),
-                                        filters: [
-                                            { name: 'Images', extensions: ['jpg', 'png', 'gif', 'webp'] }
-                                        ]
-                                    });
-                    
-                                    if (!canceled && filePath) {
-                                        mainWindow.webContents.downloadURL(imageUrl);
-                                        mainWindow.webContents.session.on('will-download', (event, item) => {
-                                            item.setSavePath(filePath);
-                                        });
-                                    }
-                                } catch (error) {
-                                    console.error('Failed to save image:', error);
-                                }
-                            }
-                        },
-                        { type: 'separator' },
-                        {
-                            label: 'Open in Browser',
-                            icon: createSvgIcon(icons.browser),
-                            click: () => {
-                                shell.openExternal(imageUrl);
-                            }
-                        },
-                        { type: 'separator' }
-                    ]);
-                    menu.popup();
-                }
-            } catch (error) {
-                console.error('Context menu error:', error);
-            }
-        });
 
-        mainWindow.webContents.on('did-finish-load', () => {
-            mainWindow.webContents.executeJavaScript(`
+                                        if (imageData) {
+                                            await mainWindow.webContents.copyImageAt(x, y);
+
+                                            if (!clipboard.availableFormats().includes('image/png')) {
+                                                const response = await fetch(imageData.src);
+                                                const buffer = Buffer.from(await response.arrayBuffer());
+                                                clipboard.writeImage(nativeImage.createFromBuffer(buffer));
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error('Copy failed:', error);
+                                    }
+                                }
+                            },
+                            {
+                                label: 'Save Image',
+                                icon: createSvgIcon(icons.download),
+                                click: async () => {
+                                    try {
+                                        const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+                                            defaultPath: path.join(app.getPath('downloads'), getFilename(imageUrl)),
+                                            filters: [
+                                                { name: 'Images', extensions: ['jpg', 'png', 'gif', 'webp'] }
+                                            ]
+                                        });
+
+                                        if (!canceled && filePath) {
+                                            mainWindow.webContents.downloadURL(imageUrl);
+                                            mainWindow.webContents.session.on('will-download', (event, item) => {
+                                                item.setSavePath(filePath);
+                                            });
+                                        }
+                                    } catch (error) {
+                                        console.error('Failed to save image:', error);
+                                    }
+                                }
+                            },
+                            { type: 'separator' },
+                            {
+                                label: 'Open in Browser',
+                                icon: createSvgIcon(icons.browser),
+                                click: () => {
+                                    shell.openExternal(imageUrl);
+                                }
+                            },
+                            { type: 'separator' }
+                        ]);
+                        menu.popup();
+                    }
+                } catch (error) {
+                    console.error('Context menu error:', error);
+                }
+            });
+
+            mainWindow.webContents.on('did-finish-load', () => {
+                mainWindow.webContents.executeJavaScript(`
                 const oldNotification = window.Notification;
                 window.Notification = function(title, options) {
                     if (options.icon && !options.icon.startsWith('http')) {
@@ -702,37 +744,37 @@ function createWindow() {
                 };
                 window.Notification.permission = 'granted';
             `);
-        });
-
-        ses.webRequest.onBeforeSendHeaders((details, callback) => {
-            callback({
-                requestHeaders: {
-                    ...details.requestHeaders,
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0',
-                    'Permissions-Policy': 'attribution-reporting=(), browsing-topics=(), compute-pressure=(), interest-cohort=(), shared-storage=(), shared-storage-select-url=()',
-                    'Document-Policy': 'default-src \'self\'; script-src \'self\';'
-                }
             });
-        });
 
-        ses.webRequest.onHeadersReceived((details, callback) => {
-            callback({
-                responseHeaders: {
-                    ...details.responseHeaders,
-                    'Permissions-Policy': 'attribution-reporting=(), browsing-topics=(), compute-pressure=(), interest-cohort=(), shared-storage=(), shared-storage-select-url=()',
-                    'Document-Policy': 'default-src \'self\'; script-src \'self\';'
-                }
+            ses.webRequest.onBeforeSendHeaders((details, callback) => {
+                callback({
+                    requestHeaders: {
+                        ...details.requestHeaders,
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0',
+                        'Permissions-Policy': 'attribution-reporting=(), browsing-topics=(), compute-pressure=(), interest-cohort=(), shared-storage=(), shared-storage-select-url=()',
+                        'Document-Policy': 'default-src \'self\'; script-src \'self\';'
+                    }
+                });
             });
-        });
 
-    } catch (error) {
-        console.error('Session configuration error:', error);
-    }
+            ses.webRequest.onHeadersReceived((details, callback) => {
+                callback({
+                    responseHeaders: {
+                        ...details.responseHeaders,
+                        'Permissions-Policy': 'attribution-reporting=(), browsing-topics=(), compute-pressure=(), interest-cohort=(), shared-storage=(), shared-storage-select-url=()',
+                        'Document-Policy': 'default-src \'self\'; script-src \'self\';'
+                    }
+                });
+            });
 
-    mainWindow.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0');
+        } catch (error) {
+            console.error('Session configuration error:', error);
+        }
 
-    mainWindow.webContents.on('did-finish-load', () => {
-        mainWindow.webContents.insertCSS(`
+        mainWindow.webContents.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0');
+
+        mainWindow.webContents.on('did-finish-load', () => {
+            mainWindow.webContents.insertCSS(`
             ::-webkit-scrollbar {
                 width: 14px;
                 background: #000000;
@@ -749,69 +791,69 @@ function createWindow() {
                 height: 1px;
             }
         `);
-    });
+        });
 
-    const cookies = mainWindow.webContents.session.cookies.get({ url: 'https://www.instagram.com' }).then((cookies) => {
-        cookies.forEach((cookie) => {
-            const { name, value, domain, path, secure, httpOnly, expirationDate } = cookie;
-            mainWindow.webContents.session.cookies.set({ url: 'https://www.instagram.com', name, value, domain, path, secure, httpOnly, expirationDate });
-        }
-        );
-    });
+        const cookies = mainWindow.webContents.session.cookies.get({ url: 'https://www.instagram.com' }).then((cookies) => {
+            cookies.forEach((cookie) => {
+                const { name, value, domain, path, secure, httpOnly, expirationDate } = cookie;
+                mainWindow.webContents.session.cookies.set({ url: 'https://www.instagram.com', name, value, domain, path, secure, httpOnly, expirationDate });
+            }
+            );
+        });
 
-    mainWindow.setMenuBarVisibility(false);
-    mainWindow.loadURL('https://www.instagram.com/');
+        mainWindow.setMenuBarVisibility(false);
+        mainWindow.loadURL('https://www.instagram.com/');
 
-    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-        shell.openExternal(url);
-        return { action: "deny" };
-    });
+        mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+            shell.openExternal(url);
+            return { action: "deny" };
+        });
 
-    mainWindow.on('close', (event) => {
-        if (!isQuitting) {
-            event.preventDefault();
-            mainWindow.hide();
-            return false;
-        }
-        store.set("windowState", mainWindow.getBounds());
-    });
+        mainWindow.on('close', (event) => {
+            if (!isQuitting) {
+                event.preventDefault();
+                mainWindow.hide();
+                return false;
+            }
+            store.set("windowState", mainWindow.getBounds());
+        });
 
-    mainWindow.on('closed', () => {
-        mainWindow = null;
-        if (accountWindow && !accountWindow.isDestroyed()) {
-            accountWindow.destroy();
-        }
-    });
+        mainWindow.on('closed', () => {
+            mainWindow = null;
+            if (accountWindow && !accountWindow.isDestroyed()) {
+                accountWindow.destroy();
+            }
+        });
 
-    mainWindow.on("close", () => {
-        store.set("windowState", mainWindow.getBounds());
-    });
+        mainWindow.on("close", () => {
+            store.set("windowState", mainWindow.getBounds());
+        });
 
-    mainWindow.webContents.on('did-finish-load', () => {
-        mainWindow.webContents.executeJavaScript(injectDownloadButton());
-        mainWindow.webContents.executeJavaScript(injectSettingsButton());
-    });
-    
-    mainWindow.webContents.on('did-navigate-in-page', () => {
-        const url = mainWindow.webContents.getURL();
-        if (url.includes('/reels')) {
-            currentActivity = 'reels';
-        } else if (url.includes('/direct')) {
-            currentActivity = 'messages';
-        } else {
-            currentActivity = 'browsing';
-        }
-        updateRPCActivity(currentActivity);
-        mainWindow.webContents.executeJavaScript(injectDownloadButton());
-        mainWindow.webContents.executeJavaScript(injectSettingsButton());
-    });
-    
-    mainWindow.webContents.on('did-navigate', () => {
-        mainWindow.webContents.executeJavaScript(injectDownloadButton());
-        mainWindow.webContents.executeJavaScript(injectSettingsButton());
-    });
-    
-    mainWindow.webContents.executeJavaScript(`
+        mainWindow.webContents.on('did-finish-load', () => {
+            mainWindow.webContents.executeJavaScript(injectDownloadButton());
+            mainWindow.webContents.executeJavaScript(injectSettingsButton());
+        });
+
+        mainWindow.webContents.on('did-navigate-in-page', () => {
+            const url = mainWindow.webContents.getURL();
+            if (url.includes('/reels')) {
+                currentActivity = 'reels';
+            } else if (url.includes('/direct')) {
+                currentActivity = 'messages';
+            } else {
+                currentActivity = 'browsing';
+            }
+            updateRPCActivity(currentActivity);
+            mainWindow.webContents.executeJavaScript(injectDownloadButton());
+            mainWindow.webContents.executeJavaScript(injectSettingsButton());
+        });
+
+        mainWindow.webContents.on('did-navigate', () => {
+            mainWindow.webContents.executeJavaScript(injectDownloadButton());
+            mainWindow.webContents.executeJavaScript(injectSettingsButton());
+        });
+
+        mainWindow.webContents.executeJavaScript(`
         window.addEventListener('hashchange', () => {
             if (window._downloadButtonObserver) {
                 window._downloadButtonObserver.disconnect();
@@ -820,7 +862,7 @@ function createWindow() {
         });
     `);
 
-    mainWindow.webContents.executeJavaScript(`
+        mainWindow.webContents.executeJavaScript(`
         window.addEventListener('hashchange', () => {
             if (window._settingsButtonObserver) {
                 window._settingsButtonObserver.disconnect();
@@ -829,138 +871,138 @@ function createWindow() {
         });
     `);
 
-    mainWindow.on('close', (event) => {
-        if (!isQuitting && settingsStore.get('closeToTray')) {
-            event.preventDefault();
-            mainWindow.hide();
-            return false;
-        }
-        store.set("windowState", mainWindow.getBounds());
-    });
+        mainWindow.on('close', (event) => {
+            if (!isQuitting && settingsStore.get('closeToTray')) {
+                event.preventDefault();
+                mainWindow.hide();
+                return false;
+            }
+            store.set("windowState", mainWindow.getBounds());
+        });
 
-    isQuitting = !settings.closeToTray;
+        isQuitting = !settings.closeToTray;
 
-    return mainWindow;
-}
-
-ipcMain.handle('get-version', () => {
-    return app.getVersion();
-});
-
-ipcMain.on('show-settings', () => {
-    if (settingsWindow) {
-        settingsWindow.focus();
-        return;
+        return mainWindow;
     }
 
-    settingsWindow = new BrowserWindow({
-        width: 400,
-        height: 500,
-        frame: true,
-        icon: path.join(__dirname, 'assets/icon.ico'),
-        autoHideMenuBar: true,
-        title: 'Freakygram Settings',
-        autoHideMenuBar: true,
-        parent: mainWindow,
-        modal: true,
-        webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: true,
-            preload: path.join(__dirname, 'preload.js')
-        }
+    ipcMain.handle('get-version', () => {
+        return app.getVersion();
     });
 
-    settingsWindow.loadFile('settings.html');
-    settingsWindow.once('ready-to-show', () => {
-        settingsWindow.show();
-    });
-
-    settingsWindow.on('closed', () => {
-        settingsWindow = null;
-    });
-});
-
-ipcMain.handle('get-settings', () => {
-    return settingsStore.store;
-});
-
-ipcMain.on('save-settings', async(event, newSettings) => {
-    settingsStore.set(newSettings);
-    if (mainWindow) {
-        isQuitting = !newSettings.closeToTray;
-
-        mainWindow.setAlwaysOnTop(newSettings.alwaysOnTop);
-
-        if (newSettings.discordRPC) {
-            await initDiscordRPC();
-        } else {
-            await destroyRPC();
+    ipcMain.on('show-settings', () => {
+        if (settingsWindow) {
+            settingsWindow.focus();
+            return;
         }
 
-        mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
-            if (permission === 'notifications') {
-                callback(newSettings.notifications);
-            } else {
-                callback(false);
+        settingsWindow = new BrowserWindow({
+            width: 400,
+            height: 500,
+            frame: true,
+            icon: path.join(__dirname, 'assets/icon.ico'),
+            autoHideMenuBar: true,
+            title: 'Freakygram Settings',
+            autoHideMenuBar: true,
+            parent: mainWindow,
+            modal: true,
+            webPreferences: {
+                nodeIntegration: true,
+                contextIsolation: true,
+                preload: path.join(__dirname, 'preload.js')
             }
         });
-    }
-});
 
-ipcMain.on('show-notification', (event, notification) => {
-    new Notification({
-        title: notification.title,
-        body: notification.body,
-        icon: notification.icon,
-        silent: notification.silent
-    }).show();
-});
+        settingsWindow.loadFile('settings.html');
+        settingsWindow.once('ready-to-show', () => {
+            settingsWindow.show();
+        });
 
-function createTray() {
-    tray = new Tray(path.join(__dirname, 'assets/tray.png'));
-    
-    const contextMenu = Menu.buildFromTemplate([
-        { 
-            label: 'Open Instagram',
-            click: () => mainWindow.show()
-        },
-        { type: 'separator' },
-        { 
-            label: 'Exit',
-            click: () => {
-                isQuitting = true;
-                app.quit();
-            }
-        }
-    ]);
-
-    tray.setToolTip('Instagram Desktop');
-    tray.setContextMenu(contextMenu);
-    
-    tray.on('click', () => {
-        mainWindow.show();
+        settingsWindow.on('closed', () => {
+            settingsWindow = null;
+        });
     });
-}
 
-ipcMain.handle('download-video', async (event, url) => {
-    try {
-        const result = await download(url);
-        return result;
-    } catch (error) {
-        console.error('Download error:', error);
-        throw error;
+    ipcMain.handle('get-settings', () => {
+        return settingsStore.store;
+    });
+
+    ipcMain.on('save-settings', async (event, newSettings) => {
+        settingsStore.set(newSettings);
+        if (mainWindow) {
+            isQuitting = !newSettings.closeToTray;
+
+            mainWindow.setAlwaysOnTop(newSettings.alwaysOnTop);
+
+            if (newSettings.discordRPC) {
+                await initDiscordRPC();
+            } else {
+                await destroyRPC();
+            }
+
+            mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
+                if (permission === 'notifications') {
+                    callback(newSettings.notifications);
+                } else {
+                    callback(false);
+                }
+            });
+        }
+    });
+
+    ipcMain.on('show-notification', (event, notification) => {
+        new Notification({
+            title: notification.title,
+            body: notification.body,
+            icon: notification.icon,
+            silent: notification.silent
+        }).show();
+    });
+
+    function createTray() {
+        tray = new Tray(path.join(__dirname, 'assets/tray.png'));
+
+        const contextMenu = Menu.buildFromTemplate([
+            {
+                label: 'Open Instagram',
+                click: () => mainWindow.show()
+            },
+            { type: 'separator' },
+            {
+                label: 'Exit',
+                click: () => {
+                    isQuitting = true;
+                    app.quit();
+                }
+            }
+        ]);
+
+        tray.setToolTip('Instagram Desktop');
+        tray.setContextMenu(contextMenu);
+
+        tray.on('click', () => {
+            mainWindow.show();
+        });
     }
-});
 
-ipcMain.handle('get-current-account', () => {
-    return store.get('currentAccount');
-});
+    ipcMain.handle('download-video', async (event, url) => {
+        try {
+            const result = await download(url);
+            return result;
+        } catch (error) {
+            console.error('Download error:', error);
+            throw error;
+        }
+    });
 
-ipcMain.handle('get-profile-data', async () => {
-    try {
-        if (!mainWindow || mainWindow.isDestroyed()) return null;
+    ipcMain.handle('get-current-account', () => {
+        return store.get('currentAccount');
+    });
 
-        const data = await mainWindow.webContents.executeJavaScript(`
+    ipcMain.handle('get-profile-data', async () => {
+        try {
+            if (!mainWindow || mainWindow.isDestroyed()) return null;
+
+            const data = await mainWindow.webContents.executeJavaScript(`
             try {
                 let username = null;
                 let avatarUrl = null;
@@ -986,50 +1028,25 @@ ipcMain.handle('get-profile-data', async () => {
             }
         `);
 
-        return data;
-    } catch (error) {
-        console.error('Failed to get profile data:', error);
-        return null;
-    }
-});
+            return data;
+        } catch (error) {
+            console.error('Failed to get profile data:', error);
+            return null;
+        }
+    });
 
-app.whenReady().then(async () => {
-    const trayIconPath = path.join(__dirname, 'assets', 'tray.png');
-    if (!require('fs').existsSync(trayIconPath)) {
-        throw new Error('Required tray icon missing');
-    }
-    if (settingsStore.get('autoUpdate')) {
-        const updater = new Updater();
-        await updater.checkForUpdates();
-    }
-    
-    if (settingsStore.get('discordRPC')) {
-        initDiscordRPC();
-    }
+    app.on('window-all-closed', () => {
+        if (tray) tray.destroy();
+        if (process.platform !== 'darwin') {
+            app.quit();
+        }
+    });
 
-    app.setName("Instagram Desktop");
-    mainWindow = createWindow();
-    createTray();
-    
-    if (process.platform === "win32") {
-        mainWindow.setIcon(path.join(__dirname, "assets", "icon.ico"));
-    }
-}).catch(error => {
-    console.error('Failed to initialize app:', error);
-    app.quit();
-});
-
-app.on('window-all-closed', () => {
-    if (tray) tray.destroy();
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
-});
-
-app.on('activate', () => {
-    if (!mainWindow) {
-        mainWindow = createWindow();
-    } else {
-        mainWindow.show();
-    }
-});
+    app.on('activate', () => {
+        if (!mainWindow) {
+            mainWindow = createWindow();
+        } else {
+            mainWindow.show();
+        }
+    });
+}
