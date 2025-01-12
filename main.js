@@ -1,4 +1,7 @@
 const { app, BrowserWindow, shell, ipcMain, session, Tray, Menu, dialog, nativeImage, clipboard } = require("electron");
+const DiscordRPC = require('discord-rpc');
+const clientId = '1327795288290758768';
+let rpc = null;
 const Store = require("electron-store");
 const path = require("path");
 const axios = require('axios');
@@ -44,6 +47,86 @@ function getAccountStore(username) {
     }
     return accountStores.get(username);
 }
+
+let currentActivity = 'browsing';
+let rpcStartTimestamp = Date.now();
+
+async function initDiscordRPC() {
+    try {
+        if (rpc) {
+            try {
+                await rpc.destroy().catch(() => {});
+            } catch (e) {}
+            rpc = null;
+        }
+
+        rpc = new DiscordRPC.Client({ transport: 'ipc' });
+        
+        rpc.on('ready', () => {
+            isRPCConnected = true;
+            updateRPCActivity(currentActivity);
+        });
+
+        rpc.on('disconnected', () => {
+            isRPCConnected = false;
+            rpc = null;
+        });
+
+        await rpc.login({ clientId }).catch(console.error);
+    } catch (error) {
+        console.error('Discord RPC Error:', error);
+        isRPCConnected = false;
+        rpc = null;
+    }
+}
+
+async function destroyRPC() {
+    if (!rpc) return;
+
+    try {
+        isRPCConnected = false;
+        await rpc.destroy().catch(() => {});
+    } catch (error) {
+        console.error('Error destroying RPC:', error);
+    } finally {
+        rpc = null;
+    }
+}
+
+function updateRPCActivity(activity) {
+    if (!rpc || !isRPCConnected) return;
+    currentActivity = activity;
+    const activities = {
+        browsing: {
+            details: 'Browsing Feed',
+            largeImageKey: "instagram",
+            smallImageKey: 'feed',
+        },
+        reels: {
+            details: 'Watching Reels',
+            largeImageKey: "instagram",
+            smallImageKey: 'reels',
+            smallImageText: 'Reels'
+        },
+        messages: {
+            details: 'Reading Messages',
+            largeImageKey: "instagram",
+            smallImageKey: 'messages',
+            smallImageText: 'Messages'
+        }
+    };
+
+    rpc.setActivity({
+        ...activities[activity],
+        startTimestamp: rpcStartTimestamp,
+        largeImageKey: 'instagram',
+        largeImageText: 'Freakygram',
+        buttons: [
+            { label: 'Download App', url: 'https://github.com/jqms/Freakygram/releases' }
+        ]
+    });
+}
+
 
 let mainWindow;
 let accountWindow;
@@ -114,6 +197,7 @@ const icons = {
 };
 app.on('before-quit', () => {
     isQuitting = true;
+    destroyRPC();
 });
 
 function injectDownloadButton() {
@@ -286,6 +370,69 @@ function injectSettingsButton() {
     `;
 }
 
+function getStoryMedia(x, y) {
+    return `
+        (function() {
+            const element = document.elementFromPoint(${x}, ${y});
+            const storyContainer = element.closest('.x5yr21d.x1n2onr6.xh8yej3');
+            if (!storyContainer) return null;
+
+            const img = storyContainer.querySelector('img.xl1xv1r');
+            const video = storyContainer.querySelector('video');
+            
+            if (img) {
+                return {
+                    type: 'image',
+                    url: img.src,
+                    username: document.querySelector('a[role="link"]')?.textContent || 'story'
+                };
+            }
+            
+            if (video) {
+                return {
+                    type: 'video',
+                    url: video.src,
+                    username: document.querySelector('a[role="link"]')?.textContent || 'story'
+                };
+            }
+            
+            return null;
+        })()
+    `;
+}
+
+function getFeedVideo(x, y) {
+    return `
+    (function() {
+        try {
+            let element = document.elementFromPoint(${x}, ${y});
+            
+            let videoElement = element.closest('video');
+            if (!videoElement) return null;
+
+            let article = videoElement.closest('article');
+            if (!article) return null;
+
+            let postLink = article.querySelector('a[href*="/p/"]');
+            if (!postLink) return null;
+
+            let postId = postLink.href.match(/\/p\/([^/?]+)/)[1];
+            if (!postId) return null;
+
+            let username = article.querySelector('._aacl._aaco._aacw._aacx._aad7._aade')?.textContent || 'video';
+
+            return {
+                type: 'video',
+                postId: postId,
+                username: username
+            };
+        } catch(e) {
+            console.error('Video detection error:', e);
+            return null;
+        }
+    })()`;
+}
+
 function createWindow() {
     const defaultState = { width: 1200, height: 800, x: undefined, y: undefined };
     const windowState = store.get("windowState", defaultState);
@@ -360,8 +507,84 @@ function createWindow() {
             //} catch (error) {
             //    console.error('Context menu error:', error);
             //}
-
+            function upperFirstLetter(string) {
+                return string.charAt(0).toUpperCase() + string.slice(1);
+            }
             try {
+                const storyMedia = await mainWindow.webContents.executeJavaScript(getStoryMedia(params.x, params.y));
+        
+                if (storyMedia) {
+                    const menu = Menu.buildFromTemplate([
+                        {
+                            label: `Copy ${upperFirstLetter(storyMedia.type)}`,
+                            icon: createSvgIcon(icons.copy),
+                            click: async () => {
+                                try {
+                                    if (storyMedia.type === 'image') {
+                                        await mainWindow.webContents.copyImageAt(x, y);
+                                    } else {
+                                        await mainWindow.webContents.copyVideoAt(x, y);
+                                    }
+                                } catch (error) {
+                                    console.error('Copy failed:', error);
+                                }
+                            }
+                        },
+                        {
+                            label: `Save ${upperFirstLetter(storyMedia.type)}`,
+                            icon: createSvgIcon(icons.download),
+                            click: async () => {
+                                const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+                                    defaultPath: path.join(
+                                        app.getPath('downloads'), 
+                                        `instagram_story_${storyMedia.username}_${Date.now()}.${storyMedia.type === 'video' ? 'mp4' : 'jpg'}`
+                                    ),
+                                    filters: [
+                                        { name: storyMedia.type === 'video' ? 'Video' : 'Image', 
+                                          extensions: [storyMedia.type === 'video' ? 'mp4' : 'jpg'] }
+                                    ]
+                                });
+        
+                                if (!canceled && filePath) {
+                                    mainWindow.webContents.downloadURL(storyMedia.url);
+                                    mainWindow.webContents.session.on('will-download', (event, item) => {
+                                        item.setSavePath(filePath);
+                                    });
+                                }
+                            }
+                        },
+                        {
+                            label: 'Copy URL',
+                            icon: createSvgIcon(icons.copy),
+                            click: () => clipboard.writeText(storyMedia.url)
+                        }
+                    ]);
+        
+                    menu.popup();
+                }
+
+                //const feedVideo = await mainWindow.webContents.executeJavaScript(getFeedVideo(params.x, params.y));
+                //if (feedVideo && feedVideo.postId) {
+                //    const menu = Menu.buildFromTemplate([
+                //        {
+                //            label: 'Save Video',
+                //            icon: createSvgIcon(icons.download),
+                //            click: async () => {
+                //                const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+                //                    defaultPath: path.join(app.getPath('downloads'), 
+                //                        `instagram_${feedVideo.username}_${Date.now()}.mp4`),
+                //                    filters: [{ name: 'Videos', extensions: ['mp4'] }]
+                //                });
+                //
+                //                if (!canceled && filePath) {
+                //                    await download(`https://www.instagram.com/p/${feedVideo.postId}/`);
+                //                }
+                //            }
+                //        }
+                //    ]);
+                //    menu.popup();
+                //}
+
                 const imageUrl = await mainWindow.webContents.executeJavaScript(`
                     (function() {
                         const element = document.elementFromPoint(${x}, ${y});
@@ -386,29 +609,6 @@ function createWindow() {
                         }
                     };
                     const menu = Menu.buildFromTemplate([
-                        {
-                            label: 'Save Image',
-                            icon: createSvgIcon(icons.download),
-                            click: async () => {
-                                try {
-                                    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-                                        defaultPath: path.join(app.getPath('downloads'), getFilename(imageUrl)),
-                                        filters: [
-                                            { name: 'Images', extensions: ['jpg', 'png', 'gif', 'webp'] }
-                                        ]
-                                    });
-                    
-                                    if (!canceled && filePath) {
-                                        mainWindow.webContents.downloadURL(imageUrl);
-                                        mainWindow.webContents.session.on('will-download', (event, item) => {
-                                            item.setSavePath(filePath);
-                                        });
-                                    }
-                                } catch (error) {
-                                    console.error('Failed to save image:', error);
-                                }
-                            }
-                        },
                         {
                             label: 'Copy Image',
                             icon: createSvgIcon(icons.copy),
@@ -437,6 +637,29 @@ function createWindow() {
                                     }
                                 } catch (error) {
                                     console.error('Copy failed:', error);
+                                }
+                            }
+                        },
+                        {
+                            label: 'Save Image',
+                            icon: createSvgIcon(icons.download),
+                            click: async () => {
+                                try {
+                                    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+                                        defaultPath: path.join(app.getPath('downloads'), getFilename(imageUrl)),
+                                        filters: [
+                                            { name: 'Images', extensions: ['jpg', 'png', 'gif', 'webp'] }
+                                        ]
+                                    });
+                    
+                                    if (!canceled && filePath) {
+                                        mainWindow.webContents.downloadURL(imageUrl);
+                                        mainWindow.webContents.session.on('will-download', (event, item) => {
+                                            item.setSavePath(filePath);
+                                        });
+                                    }
+                                } catch (error) {
+                                    console.error('Failed to save image:', error);
                                 }
                             }
                         },
@@ -570,6 +793,15 @@ function createWindow() {
     });
     
     mainWindow.webContents.on('did-navigate-in-page', () => {
+        const url = mainWindow.webContents.getURL();
+        if (url.includes('/reels')) {
+            currentActivity = 'reels';
+        } else if (url.includes('/direct')) {
+            currentActivity = 'messages';
+        } else {
+            currentActivity = 'browsing';
+        }
+        updateRPCActivity(currentActivity);
         mainWindow.webContents.executeJavaScript(injectDownloadButton());
         mainWindow.webContents.executeJavaScript(injectSettingsButton());
     });
@@ -652,12 +884,19 @@ ipcMain.handle('get-settings', () => {
     return settingsStore.store;
 });
 
-ipcMain.on('save-settings', (event, newSettings) => {
+ipcMain.on('save-settings', async(event, newSettings) => {
     settingsStore.set(newSettings);
-    
     if (mainWindow) {
         isQuitting = !newSettings.closeToTray;
+
         mainWindow.setAlwaysOnTop(newSettings.alwaysOnTop);
+
+        if (newSettings.discordRPC) {
+            await initDiscordRPC();
+        } else {
+            await destroyRPC();
+        }
+
         mainWindow.webContents.session.setPermissionRequestHandler((webContents, permission, callback) => {
             if (permission === 'notifications') {
                 callback(newSettings.notifications);
@@ -665,10 +904,6 @@ ipcMain.on('save-settings', (event, newSettings) => {
                 callback(false);
             }
         });
-    }
-    
-    if (newSettings.discordRPC) {
-
     }
 });
 
@@ -768,6 +1003,10 @@ app.whenReady().then(async () => {
         await updater.checkForUpdates();
     }
     
+    if (settingsStore.get('discordRPC')) {
+        initDiscordRPC();
+    }
+
     app.setName("Instagram Desktop");
     mainWindow = createWindow();
     createTray();
