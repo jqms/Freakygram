@@ -1,7 +1,3 @@
-Here's the updated version with the requested changes:
-
----
-
 # Freakygram
 
 I didn't like having to open a browser to access Instagram. Here's an Electron version.
@@ -29,13 +25,8 @@ I didn't like having to open a browser to access Instagram. Here's an Electron v
 - **Always On Top**:
   - Make the window always be the top window.
     - Kind of annoying when downloading videos.
-
----
-
-### **To-Do**
-- ❌ **Discord RPC**:  
-  - Discord RPC to show that you are Instagram-ing...?
-  - Would show the current reel name I guess.
+- **Discord RPC**:
+  - Shows when you are browsing feed, watching reels or messaging. 
 ---
 
 ## Installation
