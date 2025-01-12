@@ -69,7 +69,7 @@ Contributions are welcome! Please feel free to submit pull requests or create is
 ## Acknowledgments ✨
 - Built with Electron
 - Powered by Instagram's web platform
-- Special thanks to all contributors
+- Special thanks to [Flash](https://github.com/O2Flash20) for literally no reason
 
 ---
 For support, feature requests, or bug reports, please open an issue on the GitHub repository.
